@@ -3,7 +3,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-export const DEFAULT_MODEL = 'onnx-community/all-MiniLM-L6-v2-ONNX';
+export const DEFAULT_MODEL = 'Xenova/all-MiniLM-L6-v2';
 export const DEFAULT_DTYPE = 'q8';
 
 const MODEL_FILES = [
@@ -15,7 +15,7 @@ const MODEL_FILES = [
   'onnx/model_quantized.onnx',
 ];
 
-const HF_BASE = 'https://huggingface.co/onnx-community/all-MiniLM-L6-v2-ONNX/resolve/main';
+const HF_BASE = 'https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main';
 
 export function getModelBaseDir() {
   if (process.env.LCS_MODEL_DIR) return path.resolve(process.env.LCS_MODEL_DIR);
