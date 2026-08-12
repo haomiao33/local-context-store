@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { getModelDir, getModelFiles, isModelInstalled, installModel, modelStatus, removeModel } from '../../src/model.js';
+import { DEFAULT_MODEL, getModelDir, getModelFiles, isModelInstalled, installModel, modelStatus, removeModel } from '../../src/model.js';
 
 function tempDir() { return fs.mkdtempSync(path.join(os.tmpdir(), 'lcs-model-')); }
 
@@ -15,6 +15,10 @@ async function writeFixture(dir) {
     await fsp.writeFile(target, `fixture:${file}`);
   }
 }
+
+test('default local model uses Xenova all-MiniLM-L6-v2', () => {
+  assert.equal(DEFAULT_MODEL, 'Xenova/all-MiniLM-L6-v2');
+});
 
 test('model status reports missing local model', () => {
   const baseDir = tempDir();
@@ -44,6 +48,7 @@ test('model install downloads the exact runtime manifest', async () => {
   const status = await installModel({ baseDir, fetchImpl });
   assert.equal(status.installed, true);
   assert.equal(requests.length, 6);
+  assert.ok(requests.every(url => url.includes('/Xenova/all-MiniLM-L6-v2/resolve/main/')));
   assert.ok(requests.some(url => url.endsWith('/onnx/model_quantized.onnx')));
 });
 
