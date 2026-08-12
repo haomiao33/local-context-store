@@ -4,6 +4,7 @@ import { openDatabase } from './db.js';
 import { decodeVector, encodeVector, topKSimilar } from './vector.js';
 import { getEmbeddingProvider, hashText } from './embedding.js';
 import { hybridRank } from './hybrid.js';
+import { withSqliteRetry } from './sqlite-retry.js';
 
 const now = () => new Date().toISOString();
 const id = () => crypto.randomUUID();
@@ -50,7 +51,7 @@ export class ContextStore {
 
   startSession({ projectId, agent = null, model = null } = {}) {
     const sessionId = id();
-    this.db.prepare(`INSERT INTO sessions(id, project_id, agent, model, started_at) VALUES (?, ?, ?, ?, ?)`).run(sessionId, projectId, agent, model, now());
+    withSqliteRetry(() => this.db.prepare(`INSERT INTO sessions(id, project_id, agent, model, started_at) VALUES (?, ?, ?, ?, ?)`).run(sessionId, projectId, agent, model, now()));
     return sessionId;
   }
 
@@ -62,8 +63,11 @@ export class ContextStore {
     const timestamp = now();
     const score = Number(importance);
     if (!Number.isFinite(score) || score < 0 || score > 1) throw new Error('importance must be a number between 0 and 1');
-    this.db.prepare(`INSERT INTO items(id, project_id, session_id, type, content, importance, created_at, updated_at, source_agent, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(itemId, projectId, sessionId, type, content.trim(), score, timestamp, timestamp, agent, JSON.stringify(metadata));
-    this.db.prepare(`INSERT INTO items_fts(id, project_id, content, type) VALUES (?, ?, ?, ?)`).run(itemId, projectId, content.trim(), type);
+    const insert = this.db.transaction(() => {
+      this.db.prepare(`INSERT INTO items(id, project_id, session_id, type, content, importance, created_at, updated_at, source_agent, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(itemId, projectId, sessionId, type, content.trim(), score, timestamp, timestamp, agent, JSON.stringify(metadata));
+      this.db.prepare(`INSERT INTO items_fts(id, project_id, content, type) VALUES (?, ?, ?, ?)`).run(itemId, projectId, content.trim(), type);
+    });
+    withSqliteRetry(insert);
     return this.get(itemId);
   }
 
@@ -73,7 +77,7 @@ export class ContextStore {
 
   saveEmbedding({ itemId, model, vector, contentHash }) {
     if (!itemId || !model || !Array.isArray(vector) || !contentHash) throw new Error('itemId, model, vector and contentHash are required');
-    this.db.prepare(`
+    withSqliteRetry(() => this.db.prepare(`
       INSERT INTO item_embeddings(item_id, model, dimensions, vector, content_hash, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(item_id) DO UPDATE SET
@@ -82,7 +86,7 @@ export class ContextStore {
         vector = excluded.vector,
         content_hash = excluded.content_hash,
         created_at = excluded.created_at
-    `).run(itemId, model, vector.length, encodeVector(vector), contentHash, now());
+    `).run(itemId, model, vector.length, encodeVector(vector), contentHash, now()));
   }
 
   getEmbedding(itemId, contentHash = null, model = null) {
@@ -182,7 +186,7 @@ export class ContextStore {
 
   snapshot({ projectId, sessionId = null, title, goal = null, state = {}, tokenCount = 0 }) {
     const snapshotId = id();
-    this.db.prepare(`INSERT INTO snapshots(id, project_id, session_id, title, goal, state_json, token_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(snapshotId, projectId, sessionId, title, goal, JSON.stringify(state), tokenCount, now());
+    withSqliteRetry(() => this.db.prepare(`INSERT INTO snapshots(id, project_id, session_id, title, goal, state_json, token_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(snapshotId, projectId, sessionId, title, goal, JSON.stringify(state), tokenCount, now()));
     return this.db.prepare('SELECT * FROM snapshots WHERE id = ?').get(snapshotId);
   }
 
