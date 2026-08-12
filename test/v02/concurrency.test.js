@@ -8,7 +8,7 @@ import { createStore } from '../../src/store.js';
 
 function runWorker(workerData) {
   return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL('./concurrency-worker.js', import.meta.url), { workerData });
+    const worker = new Worker(new URL('../../src/concurrency-worker.js', import.meta.url), { workerData });
     worker.once('message', message => message.ok ? resolve() : reject(new Error(message.error)));
     worker.once('error', reject);
     worker.once('exit', code => {
