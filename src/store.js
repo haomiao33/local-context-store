@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { openDatabase } from './db.js';
-import { decodeVector, encodeVector } from './vector.js';
+import { decodeVector, encodeVector, topKSimilar } from './vector.js';
+import { getEmbeddingProvider, hashText } from './embedding.js';
+import { hybridRank } from './hybrid.js';
 
 const now = () => new Date().toISOString();
 const id = () => crypto.randomUUID();
@@ -18,6 +20,29 @@ function ftsQuery(query) {
   return queryTokens(query)
     .map(t => `"${t.replaceAll('"', '""')}"*`)
     .join(' OR ');
+}
+
+function lexicalScore(item) {
+  const bm25 = Number(item.fts_rank);
+  return Number.isFinite(bm25) ? 1 / (1 + Math.max(0, bm25)) : 0;
+}
+
+function recencyScore(updatedAt) {
+  const ageDays = Math.max(0, (Date.now() - Date.parse(updatedAt)) / 86400000);
+  return 1 / (1 + ageDays / 30);
+}
+
+function selectBudget(items, budget) {
+  const selected = [];
+  let tokens = 0;
+  for (const item of items) {
+    const itemTokens = Math.ceil(item.content.length / 4) + 12;
+    if (selected.length && tokens + itemTokens > budget) continue;
+    selected.push(item);
+    tokens += itemTokens;
+    if (tokens >= budget) break;
+  }
+  return { items: selected, tokenCount: tokens };
 }
 
 export class ContextStore {
@@ -60,10 +85,64 @@ export class ContextStore {
     `).run(itemId, model, vector.length, encodeVector(vector), contentHash, now());
   }
 
-  getEmbedding(itemId, contentHash = null) {
+  getEmbedding(itemId, contentHash = null, model = null) {
     const row = this.db.prepare('SELECT * FROM item_embeddings WHERE item_id = ?').get(itemId);
-    if (!row || (contentHash && row.content_hash !== contentHash)) return null;
+    if (!row || (contentHash && row.content_hash !== contentHash) || (model && row.model !== model)) return null;
     return { ...row, vector: decodeVector(row.vector) };
+  }
+
+  async indexEmbeddings({ projectId, embeddingProvider = getEmbeddingProvider() } = {}) {
+    const items = this.db.prepare('SELECT id, content FROM items WHERE project_id = ? ORDER BY created_at ASC').all(projectId);
+    let indexed = 0;
+    for (const item of items) {
+      const contentHash = hashText(item.content);
+      if (this.getEmbedding(item.id, contentHash, embeddingProvider.model)) continue;
+      const vector = await embeddingProvider.embed(item.content);
+      this.saveEmbedding({ itemId: item.id, model: embeddingProvider.model, vector, contentHash });
+      indexed++;
+    }
+    return { indexed, total: items.length };
+  }
+
+  async contextAsync({ projectId, task, budget = 8000, limit = 50, embeddingProvider = getEmbeddingProvider(), weights } = {}) {
+    if (!task?.trim()) return { projectId, task, tokenCount: 0, items: [] };
+    await this.indexEmbeddings({ projectId, embeddingProvider });
+
+    const lexicalById = new Map();
+    for (const item of this.search({ projectId, query: task, limit })) lexicalById.set(item.id, item);
+    for (const token of queryTokens(task)) {
+      for (const item of this.search({ projectId, query: token, limit })) {
+        if (!lexicalById.has(item.id)) lexicalById.set(item.id, item);
+      }
+    }
+
+    const queryVector = await embeddingProvider.embed(task);
+    const rows = this.db.prepare(`
+      SELECT i.*, e.model, e.vector AS vector_blob
+      FROM item_embeddings e
+      JOIN items i ON i.id = e.item_id
+      WHERE i.project_id = ? AND e.model = ?
+    `).all(projectId, embeddingProvider.model);
+    const semantic = topKSimilar(queryVector, rows.map(row => ({
+      ...row,
+      vector: decodeVector(row.vector_blob),
+      importance: row.importance,
+      recency: recencyScore(row.updated_at),
+    })), Math.max(limit, 50));
+
+    const lexical = [...lexicalById.values()].map(item => ({
+      ...item,
+      ftsScore: lexicalScore(item),
+      importance: item.importance,
+      recency: recencyScore(item.updated_at),
+    }));
+
+    const ranked = hybridRank({ lexical, semantic, weights }).map(item => ({
+      ...item,
+      score: item.score,
+    }));
+    const selected = selectBudget(ranked, budget);
+    return { projectId, task, tokenCount: selected.tokenCount, items: selected.items };
   }
 
   search({ projectId, query, limit = 20 }) {
@@ -88,27 +167,12 @@ export class ContextStore {
         if (!byId.has(item.id)) byId.set(item.id, item);
       }
     }
-
-    const candidates = [...byId.values()].slice(0, limit);
-    const nowMs = Date.now();
-    const ranked = candidates.map(item => {
-      const ageDays = Math.max(0, (nowMs - Date.parse(item.updated_at)) / 86400000);
-      const recency = 1 / (1 + ageDays / 30);
-      const bm25 = Number(item.fts_rank);
-      const lexical = Number.isFinite(bm25) ? 1 / (1 + Math.max(0, bm25)) : 0;
-      return { ...item, score: lexical * 0.55 + item.importance * 0.30 + recency * 0.15 };
-    }).sort((a,b) => b.score - a.score);
-
-    const selected = [];
-    let tokens = 0;
-    for (const item of ranked) {
-      const itemTokens = Math.ceil(item.content.length / 4) + 12;
-      if (selected.length && tokens + itemTokens > budget) continue;
-      selected.push(item);
-      tokens += itemTokens;
-      if (tokens >= budget) break;
-    }
-    return { projectId, task, tokenCount: tokens, items: selected };
+    const ranked = [...byId.values()].slice(0, limit).map(item => ({
+      ...item,
+      score: lexicalScore(item) * 0.55 + item.importance * 0.30 + recencyScore(item.updated_at) * 0.15,
+    })).sort((a,b) => b.score - a.score);
+    const selected = selectBudget(ranked, budget);
+    return { projectId, task, tokenCount: selected.tokenCount, items: selected.items };
   }
 
   snapshot({ projectId, sessionId = null, title, goal = null, state = {}, tokenCount = 0 }) {
