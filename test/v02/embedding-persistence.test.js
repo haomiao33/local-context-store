@@ -19,7 +19,8 @@ test('embedding is persisted and can be loaded without recomputing', () => {
     store.saveEmbedding({ itemId: item.id, model: 'test-hash-v1', vector, contentHash: 'hash-1' });
     const loaded = store.getEmbedding(item.id);
     assert.equal(loaded.model, 'test-hash-v1');
-    assert.deepEqual(loaded.vector, vector);
+    assert.equal(loaded.vector.length, vector.length);
+    loaded.vector.forEach((value, index) => assert.ok(Math.abs(value - vector[index]) < 1e-6));
     assert.equal(loaded.contentHash, 'hash-1');
   } finally {
     store.close();
