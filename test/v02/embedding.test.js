@@ -36,3 +36,18 @@ test('embedding provider rejects empty input', async () => {
   const provider = testProvider(64);
   await assert.rejects(() => provider.embed('   '), /text is required/);
 });
+
+test('concurrent embedding calls initialize the local model only once', async () => {
+  let factoryCalls = 0;
+  const provider = createEmbeddingProvider({
+    model: 'test-local-model',
+    dimensions: 4,
+    pipelineFactory: async () => {
+      factoryCalls++;
+      await new Promise(resolve => setTimeout(resolve, 5));
+      return async () => ({ data: new Float32Array([1, 0, 0, 0]) });
+    },
+  });
+  await Promise.all(Array.from({ length: 20 }, (_, i) => provider.embed(`text ${i}`)));
+  assert.equal(factoryCalls, 1);
+});
