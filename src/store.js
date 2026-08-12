@@ -24,8 +24,7 @@ export class ContextStore {
 
   startSession({ projectId, agent = null, model = null } = {}) {
     const sessionId = id();
-    this.db.prepare(`INSERT INTO sessions(id, project_id, agent, model, started_at) VALUES (?, ?, ?, ?, ?)`)
-      .run(sessionId, projectId, agent, model, now());
+    this.db.prepare(`INSERT INTO sessions(id, project_id, agent, model, started_at) VALUES (?, ?, ?, ?, ?)`).run(sessionId, projectId, agent, model, now());
     return sessionId;
   }
 
@@ -37,10 +36,8 @@ export class ContextStore {
     const timestamp = now();
     const score = Number(importance);
     if (!Number.isFinite(score) || score < 0 || score > 1) throw new Error('importance must be a number between 0 and 1');
-    this.db.prepare(`INSERT INTO items(id, project_id, session_id, type, content, importance, created_at, updated_at, source_agent, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(itemId, projectId, sessionId, type, content.trim(), score, timestamp, timestamp, agent, JSON.stringify(metadata));
-    this.db.prepare(`INSERT INTO items_fts(id, project_id, content, type) VALUES (?, ?, ?, ?)`)
-      .run(itemId, projectId, content.trim(), type);
+    this.db.prepare(`INSERT INTO items(id, project_id, session_id, type, content, importance, created_at, updated_at, source_agent, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(itemId, projectId, sessionId, type, content.trim(), score, timestamp, timestamp, agent, JSON.stringify(metadata));
+    this.db.prepare(`INSERT INTO items_fts(id, project_id, content, type) VALUES (?, ?, ?, ?)`).run(itemId, projectId, content.trim(), type);
     return this.get(itemId);
   }
 
@@ -63,16 +60,17 @@ export class ContextStore {
   }
 
   context({ projectId, task, budget = 8000, limit = 50 }) {
-    const primary = this.search({ projectId, query: task, limit });
-    const byId = new Map(primary.map(item => [item.id, item]));
+    const byId = new Map();
 
-    // Fallback to per-term retrieval so a task still produces useful context
-    // when a multi-term FTS query returns no rows.
-    if (!primary.length) {
-      for (const token of queryTokens(task)) {
-        for (const item of this.search({ projectId, query: token, limit })) {
-          byId.set(item.id, item);
-        }
+    // Retrieve the complete task first, then supplement it with per-token
+    // searches. This keeps context robust when a multi-word FTS query does
+    // not return every useful item while preserving the normal ranked path.
+    for (const item of this.search({ projectId, query: task, limit })) {
+      byId.set(item.id, item);
+    }
+    for (const token of queryTokens(task)) {
+      for (const item of this.search({ projectId, query: token, limit })) {
+        if (!byId.has(item.id)) byId.set(item.id, item);
       }
     }
 
@@ -100,8 +98,7 @@ export class ContextStore {
 
   snapshot({ projectId, sessionId = null, title, goal = null, state = {}, tokenCount = 0 }) {
     const snapshotId = id();
-    this.db.prepare(`INSERT INTO snapshots(id, project_id, session_id, title, goal, state_json, token_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(snapshotId, projectId, sessionId, title, goal, JSON.stringify(state), tokenCount, now());
+    this.db.prepare(`INSERT INTO snapshots(id, project_id, session_id, title, goal, state_json, token_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(snapshotId, projectId, sessionId, title, goal, JSON.stringify(state), tokenCount, now());
     return this.db.prepare('SELECT * FROM snapshots WHERE id = ?').get(snapshotId);
   }
 
