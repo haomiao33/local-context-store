@@ -6,6 +6,7 @@ export function openDatabase(filename) {
   fs.mkdirSync(path.dirname(filename), { recursive: true });
   const db = new Database(filename);
   db.pragma('journal_mode = WAL');
+  db.pragma('busy_timeout = 5000');
   db.pragma('foreign_keys = ON');
   db.exec(`
     CREATE TABLE IF NOT EXISTS items (
@@ -42,6 +43,16 @@ export function openDatabase(filename) {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_snapshots_project ON snapshots(project_id);
+    CREATE TABLE IF NOT EXISTS item_embeddings (
+      item_id TEXT PRIMARY KEY,
+      model TEXT NOT NULL,
+      dimensions INTEGER NOT NULL,
+      vector BLOB NOT NULL,
+      content_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(item_id) REFERENCES items(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_item_embeddings_model_hash ON item_embeddings(model, content_hash);
     CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
       id UNINDEXED,
       project_id UNINDEXED,
