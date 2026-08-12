@@ -1,16 +1,17 @@
 {
   "name": "local-context-store",
-  "version": "0.1.0",
+  "version": "0.2.0-alpha.1",
   "description": "A local-first context store for coding agents such as Claude Code and Codex.",
   "type": "module",
   "bin": { "ctx": "./src/cli.js" },
   "files": ["src", "README.md", "LICENSE"],
   "scripts": {
-    "build": "node --check src/db.js && node --check src/store.js && node --check src/cli.js && node --check src/mcp.js",
+    "build": "node --check src/db.js && node --check src/store.js && node --check src/vector.js && node --check src/embedding.js && node --check src/hybrid.js && node --check src/cli.js && node --check src/mcp.js",
     "test": "node --test",
     "start": "node src/cli.js"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "@modelcontextprotocol/sdk": "^1.17.5",
     "better-sqlite3": "^12.4.1",
     "commander": "^14.0.0",
