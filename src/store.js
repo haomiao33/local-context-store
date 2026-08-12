@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { openDatabase } from './db.js';
+import { decodeVector, encodeVector } from './vector.js';
 
 const now = () => new Date().toISOString();
 const id = () => crypto.randomUUID();
@@ -45,6 +46,26 @@ export class ContextStore {
     return this.db.prepare('SELECT * FROM items WHERE id = ?').get(itemId) ?? null;
   }
 
+  saveEmbedding({ itemId, model, vector, contentHash }) {
+    if (!itemId || !model || !Array.isArray(vector) || !contentHash) throw new Error('itemId, model, vector and contentHash are required');
+    this.db.prepare(`
+      INSERT INTO item_embeddings(item_id, model, dimensions, vector, content_hash, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(item_id) DO UPDATE SET
+        model = excluded.model,
+        dimensions = excluded.dimensions,
+        vector = excluded.vector,
+        content_hash = excluded.content_hash,
+        created_at = excluded.created_at
+    `).run(itemId, model, vector.length, encodeVector(vector), contentHash, now());
+  }
+
+  getEmbedding(itemId, contentHash = null) {
+    const row = this.db.prepare('SELECT * FROM item_embeddings WHERE item_id = ?').get(itemId);
+    if (!row || (contentHash && row.content_hash !== contentHash)) return null;
+    return { ...row, vector: decodeVector(row.vector) };
+  }
+
   search({ projectId, query, limit = 20 }) {
     if (!query?.trim()) return this.db.prepare('SELECT * FROM items WHERE project_id = ? ORDER BY updated_at DESC LIMIT ?').all(projectId, limit);
     const match = ftsQuery(query);
@@ -61,13 +82,7 @@ export class ContextStore {
 
   context({ projectId, task, budget = 8000, limit = 50 }) {
     const byId = new Map();
-
-    // Retrieve the complete task first, then supplement it with per-token
-    // searches. This keeps context robust when a multi-word FTS query does
-    // not return every useful item while preserving the normal ranked path.
-    for (const item of this.search({ projectId, query: task, limit })) {
-      byId.set(item.id, item);
-    }
+    for (const item of this.search({ projectId, query: task, limit })) byId.set(item.id, item);
     for (const token of queryTokens(task)) {
       for (const item of this.search({ projectId, query: token, limit })) {
         if (!byId.has(item.id)) byId.set(item.id, item);
