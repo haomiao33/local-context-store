@@ -36,7 +36,7 @@ The store is deliberately local and simple:
 - no API key or hosted vector database
 - easy to back up, inspect, move, or delete
 
-The default semantic model runs locally through ONNX. The model is downloaded once on first semantic use and cached locally; inference does not call an embedding API. Quantized `q8` inference is used by default to keep resource usage low.
+The semantic model runs locally through ONNX. It is installed once into a shared per-user model directory; inference does not call an embedding API. Quantized `q8` inference is used by default to keep resource usage low.
 
 ## v0.1 retrieval
 
@@ -91,6 +91,36 @@ ctx context "fix authentication refresh race" --semantic
 ```
 
 The semantic path lazily indexes missing embeddings. Subsequent queries reuse the stored vectors.
+
+## Local embedding model
+
+The default model is `onnx-community/all-MiniLM-L6-v2-ONNX` with `q8` inference. The runtime expects the Transformers.js layout with `config.json` and tokenizer files at the model root and the quantized ONNX weights at `onnx/model_quantized.onnx`. The model repository is Apache-2.0 licensed.
+
+The model is **not committed to this Git repository**. It is installed once per machine and shared by all projects.
+
+```bash
+ctx model status
+ctx model install
+ctx model remove
+```
+
+For an offline/manual install, download the model repository from Hugging Face and pass its local directory:
+
+```bash
+ctx model install --source C:\path\to\all-MiniLM-L6-v2-ONNX
+```
+
+The default model location is platform-specific. On Windows it is under `%LOCALAPPDATA%\local-context-store\models`; set `LCS_MODEL_DIR` to override it.
+
+After installation, semantic retrieval is fully local:
+
+```text
+ctx context "fix authentication refresh race" --semantic
+       ↓
+SQLite FTS5 + local ONNX embedding
+       ↓
+Hybrid Context Pack
+```
 
 ## Quick start
 
@@ -150,15 +180,6 @@ Options:
 | `-t, --type <type>` | `note` | Context type. One of `fact`, `decision`, `task`, `constraint`, `observation`, `note`. |
 | `-i, --importance <number>` | `0.5` | Importance from `0` (low) to `1` (critical). Used when ranking context. |
 
-Recommended types:
-
-- `fact` — stable project knowledge.
-- `decision` — a technical or product decision already made.
-- `task` — work that needs to be done or continued.
-- `constraint` — something the agent must not violate.
-- `observation` — something discovered during development.
-- `note` — general durable context.
-
 ### `ctx search <query>`
 
 Search stored context using SQLite FTS5 full-text search.
@@ -172,8 +193,6 @@ Options:
 | Option | Default | Meaning |
 |---|---:|---|
 | `-l, --limit <number>` | `20` | Maximum number of matching records to return. |
-
-Use this when you want to inspect the stored context directly.
 
 ### `ctx context <task>`
 
@@ -190,23 +209,20 @@ Options:
 | `-b, --budget <number>` | `8000` | Approximate maximum number of tokens to include in the returned Context Pack. |
 | `--semantic` | off | Add local embedding retrieval and hybrid ranking. No embedding API is used. |
 
-Examples:
+### `ctx model`
+
+Manage the shared local embedding model.
 
 ```bash
-ctx context "fix authentication refresh race"
-ctx context "fix authentication refresh race" --semantic
-ctx context "refactor payment service" --budget 4000
+ctx model status
+ctx model install
+ctx model install --source C:\path\to\all-MiniLM-L6-v2-ONNX
+ctx model remove
 ```
 
-The important distinction:
-
-```text
-ctx search
-    = inspect search results
-
-ctx context
-    = prepare the context an AI agent actually needs
-```
+- `status` shows the model path and required files.
+- `install` downloads the model once, or copies an already downloaded model with `--source`.
+- `remove` deletes the shared local model.
 
 ### `ctx snapshot <title>`
 
@@ -226,40 +242,14 @@ The repository includes a repeatable local benchmark for the retrieval path. It 
 npm run benchmark
 ```
 
-Default corpus sizes:
-
-```text
-1,000
-10,000
-100,000 context items
-```
-
-Useful options:
-
-```bat
-set LCS_BENCH_SIZES=1000,10000,100000
-set LCS_BENCH_QUERIES=30
-set LCS_BENCH_VECTOR_DIMS=32
-npm run benchmark
-```
-
-To measure the actual local ONNX embedding model, including cold start, warm latency, and RSS growth:
+To measure the actual local ONNX embedding model:
 
 ```bat
 set LCS_BENCH_LOCAL_EMBED=1
 npm run benchmark
 ```
 
-The important numbers are:
-
-- **FTS p50 / p95** — lexical retrieval latency.
-- **Context p50 / p95** — time to construct the token-budgeted Context Pack.
-- **Vector p50 / p95** — in-memory semantic candidate scan latency.
-- **Cold embedding** — first local model inference, including model initialization.
-- **Warm embedding p50 / p95** — repeated local inference after initialization.
-- **RSS delta** — approximate process memory increase during local embedding initialization.
-
-This benchmark is intentionally not a synthetic promise of production performance. Run it on the machines that matter. The target is simple: **fast local retrieval, low resource usage, and predictable latency as the context store grows.**
+Run the benchmark on the machines that matter. The target is simple: **fast local retrieval, low resource usage, and predictable latency as the context store grows.**
 
 ## Development
 
@@ -269,4 +259,4 @@ Run the full regression suite:
 npm test
 ```
 
-The v0.2 test suite covers persistence, FTS5 retrieval, token budgets, local embeddings, embedding persistence/invalidation, hybrid ranking, SQLite retry behavior, concurrent database initialization, and multi-process concurrent readers/writers.
+The v0.2 test suite covers persistence, FTS5 retrieval, token budgets, local embeddings, embedding persistence/invalidation, hybrid ranking, model management, SQLite retry behavior, concurrent database initialization, and multi-process concurrent readers/writers.

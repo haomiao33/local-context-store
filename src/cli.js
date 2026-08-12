@@ -3,6 +3,7 @@ import path from 'node:path';
 import { Command } from 'commander';
 import { createStore, projectDatabase, ITEM_TYPES } from './store.js';
 import { getEmbeddingProvider } from './embedding.js';
+import { getModelBaseDir, modelStatus, installModel, removeModel } from './model.js';
 
 const cwd = process.cwd();
 const projectId = path.resolve(cwd);
@@ -14,16 +15,12 @@ program
   .version('0.2.0-alpha.1')
   .showHelpAfterError();
 
-program
-  .command('init')
-  .description('Initialize a project-local context database at .context/context.db')
-  .action(() => {
-    const store = createStore(cwd); store.close();
-    console.log(`Initialized ${projectDatabase(cwd)}`);
-  });
+program.command('init').description('Initialize a project-local context database at .context/context.db').action(() => {
+  const store = createStore(cwd); store.close();
+  console.log(`Initialized ${projectDatabase(cwd)}`);
+});
 
-program
-  .command('remember <content>')
+program.command('remember <content>')
   .description('Save durable project context that agents should remember')
   .addHelpText('after', '\nExamples:\n  $ ctx remember "Auth uses Zustand" --type decision --importance 0.9\n  $ ctx remember "Do not change public auth API" --type constraint --importance 1\n')
   .option('-t, --type <type>', 'context type: fact|decision|task|constraint|observation|note', 'note')
@@ -38,8 +35,7 @@ program
     console.log(`[${item.type}] ${item.id}\n${item.content}`);
   });
 
-program
-  .command('search <query>')
+program.command('search <query>')
   .description('Find stored context by full-text search')
   .addHelpText('after', '\nExamples:\n  $ ctx search "authentication refresh"\n  $ ctx search "public API" --limit 10\n')
   .option('-l, --limit <number>', 'maximum number of results', '20')
@@ -52,10 +48,9 @@ program
     for (const r of rows) console.log(`${r.id}  [${r.type}] ${r.content}`);
   });
 
-program
-  .command('context <task>')
+program.command('context <task>')
   .description('Build a relevant, token-budgeted context pack for a coding task')
-  .addHelpText('after', '\nExamples:\n  $ ctx context "fix authentication refresh race"\n  $ ctx context "fix authentication refresh race" --semantic\n  $ ctx context "refactor payment service" --budget 4000\n\nThe budget is an approximate token limit for the returned context pack.\n--semantic enables local embedding + FTS5 hybrid retrieval. The model runs locally and is cached after first use.\n')
+  .addHelpText('after', '\nExamples:\n  $ ctx context "fix authentication refresh race"\n  $ ctx context "fix authentication refresh race" --semantic\n  $ ctx context "refactor payment service" --budget 4000\n\nThe budget is an approximate token limit for the returned context pack.\n--semantic enables local embedding + FTS5 hybrid retrieval. The model must be installed locally.\n')
   .option('-b, --budget <number>', 'approximate token budget for the context pack', '8000')
   .option('--semantic', 'use local embedding + FTS5 hybrid retrieval')
   .action(async (task, opts) => {
@@ -71,8 +66,26 @@ program
     console.log(`Items: ${result.items.length}  Approx. tokens: ${result.tokenCount}`);
   });
 
-program
-  .command('snapshot <title>')
+const model = program.command('model').description('Manage the local embedding model');
+model.command('status').description('Show local embedding model status and path').action(() => {
+  const status = modelStatus();
+  console.log(`Model: ${status.model}\nPath: ${status.dir}\nStatus: ${status.installed ? 'installed' : 'not installed'}`);
+  for (const file of status.files) console.log(`  ${file.exists ? '✓' : '✗'} ${file.file}`);
+});
+model.command('install')
+  .description('Install the local embedding model')
+  .option('--source <directory>', 'copy an already-downloaded model directory instead of downloading')
+  .action(async opts => {
+    const status = await installModel({ sourceDir: opts.source });
+    console.log(`Installed ${status.model}`);
+    console.log(`Path: ${status.dir}`);
+  });
+model.command('remove').description('Remove the local embedding model').action(async () => {
+  await removeModel();
+  console.log(`Removed local model from ${getModelBaseDir()}`);
+});
+
+program.command('snapshot <title>')
   .description('Save a lightweight checkpoint for resuming or handing work to another agent')
   .addHelpText('after', '\nExamples:\n  $ ctx snapshot "Auth refresh handoff" --task "fix auth refresh"\n  $ ctx snapshot "Payment refactor" --goal "preserve public API"\n')
   .option('-g, --goal <goal>', 'the goal or outcome of the work')
@@ -86,23 +99,17 @@ program
     console.log(`Snapshot ${snapshot.id} created.`);
   });
 
-program
-  .command('show-snapshot')
-  .description('Show the latest project resume checkpoint')
-  .action(() => {
-    const store = createStore(cwd);
-    const snapshot = store.latestSnapshot(projectId);
-    store.close();
-    if (!snapshot) return console.log('No snapshots.');
-    console.log(JSON.stringify(snapshot, null, 2));
-  });
+program.command('show-snapshot').description('Show the latest project resume checkpoint').action(() => {
+  const store = createStore(cwd);
+  const snapshot = store.latestSnapshot(projectId);
+  store.close();
+  if (!snapshot) return console.log('No snapshots.');
+  console.log(JSON.stringify(snapshot, null, 2));
+});
 
-program
-  .command('mcp')
+program.command('mcp')
   .description('Start the local MCP server over stdio for Claude Code, Codex, or another MCP client')
   .addHelpText('after', '\nThe server uses the current working directory as the project and .context/context.db as its database.\n\nExample:\n  $ ctx mcp\n')
-  .action(async () => {
-    await import('./mcp.js');
-  });
+  .action(async () => { await import('./mcp.js'); });
 
 program.parseAsync().catch(err => { console.error(`Error: ${err.message}`); process.exit(1); });

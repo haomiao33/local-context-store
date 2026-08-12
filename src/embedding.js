@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { cosineSimilarity } from './vector.js';
+import { DEFAULT_MODEL, getModelBaseDir } from './model.js';
 
-const DEFAULT_MODEL = 'onnx-community/all-MiniLM-L6-v2-ONNX';
 const DEFAULT_DIMENSIONS = 384;
 const providers = new Map();
 
@@ -35,7 +35,10 @@ function hashEmbedding(text, dimensions) {
 }
 
 async function createLocalPipeline({ model, dtype = 'q8' }) {
-  const { pipeline } = await import('@huggingface/transformers');
+  const { env, pipeline } = await import('@huggingface/transformers');
+  env.localModelPath = getModelBaseDir();
+  env.allowLocalModels = true;
+  env.allowRemoteModels = false;
   return pipeline('feature-extraction', model, { dtype });
 }
 
@@ -52,21 +55,13 @@ export function createEmbeddingProvider({
     if (!text?.trim()) throw new Error('text is required');
     if (backend === 'hash') return hashEmbedding(text, dimensions);
 
-    if (!pipelinePromise) {
-      pipelinePromise = Promise.resolve(pipelineFactory({ model, dtype }));
-    }
+    if (!pipelinePromise) pipelinePromise = Promise.resolve(pipelineFactory({ model, dtype }));
     const extractor = await pipelinePromise;
     const output = await extractor(text, { pooling: 'mean', normalize: true });
     return Array.from(output.data);
   }
 
-  return {
-    model,
-    dimensions,
-    backend,
-    embed,
-    similarity: cosineSimilarity,
-  };
+  return { model, dimensions, backend, embed, similarity: cosineSimilarity };
 }
 
 export function getEmbeddingProvider(options = {}) {
