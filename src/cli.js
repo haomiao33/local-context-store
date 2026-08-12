@@ -2,6 +2,7 @@
 import path from 'node:path';
 import { Command } from 'commander';
 import { createStore, projectDatabase, ITEM_TYPES } from './store.js';
+import { getEmbeddingProvider } from './embedding.js';
 
 const cwd = process.cwd();
 const projectId = path.resolve(cwd);
@@ -10,7 +11,7 @@ const program = new Command();
 program
   .name('ctx')
   .description('Local Context Store for coding agents')
-  .version('0.1.0')
+  .version('0.2.0-alpha.1')
   .showHelpAfterError();
 
 program
@@ -54,15 +55,18 @@ program
 program
   .command('context <task>')
   .description('Build a relevant, token-budgeted context pack for a coding task')
-  .addHelpText('after', '\nExamples:\n  $ ctx context "fix authentication refresh race"\n  $ ctx context "refactor payment service" --budget 4000\n\nThe budget is an approximate token limit for the returned context pack.\n')
+  .addHelpText('after', '\nExamples:\n  $ ctx context "fix authentication refresh race"\n  $ ctx context "fix authentication refresh race" --semantic\n  $ ctx context "refactor payment service" --budget 4000\n\nThe budget is an approximate token limit for the returned context pack.\n--semantic enables local embedding + FTS5 hybrid retrieval. The model runs locally and is cached after first use.\n')
   .option('-b, --budget <number>', 'approximate token budget for the context pack', '8000')
-  .action((task, opts) => {
+  .option('--semantic', 'use local embedding + FTS5 hybrid retrieval')
+  .action(async (task, opts) => {
     const budget = Number(opts.budget);
     if (!Number.isInteger(budget) || budget < 1) throw new Error('budget must be a positive integer');
     const store = createStore(cwd);
-    const result = store.context({ projectId, task, budget });
+    const result = opts.semantic
+      ? await store.contextAsync({ projectId, task, budget, embeddingProvider: getEmbeddingProvider() })
+      : store.context({ projectId, task, budget });
     store.close();
-    console.log(`Context\n────────────────────────────\nTask\n  ${task}\n`);
+    console.log(`Context${opts.semantic ? ' (hybrid)' : ''}\n────────────────────────────\nTask\n  ${task}\n`);
     for (const item of result.items) console.log(`[${item.type}] ${item.content}\n`);
     console.log(`Items: ${result.items.length}  Approx. tokens: ${result.tokenCount}`);
   });
