@@ -68,3 +68,12 @@ test('cli help documents the core commands and options', () => {
   assert.match(result.stdout, /snapshot/);
   assert.match(result.stdout, /mcp/);
 });
+
+test('cli context help documents the local semantic retrieval option', () => {
+  const project = tempProject();
+  const result = run(project, ['context', '--help']);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /--semantic/);
+  assert.match(result.stdout, /local embedding/);
+  assert.match(result.stdout, /budget/);
+});
