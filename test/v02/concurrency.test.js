@@ -23,6 +23,7 @@ test('randomized concurrent writers and readers share one SQLite project safely'
   const workers = 8;
   const writesPerWorker = 100;
   const searchesPerWorker = 100;
+  const rssBefore = process.memoryUsage().rss;
 
   const started = performance.now();
   await Promise.all(Array.from({ length: workers }, (_, workerId) => runWorker({
@@ -33,11 +34,15 @@ test('randomized concurrent writers and readers share one SQLite project safely'
     searches: searchesPerWorker,
   })));
   const elapsedMs = performance.now() - started;
+  const rssAfter = process.memoryUsage().rss;
 
   const store = createStore(projectDir);
   try {
     const rows = store.search({ projectId, query: 'authentication', limit: 10_000 });
     const count = store.db.prepare('SELECT COUNT(*) AS count FROM items WHERE project_id = ?').get(projectId).count;
+    const totalOps = workers * (writesPerWorker + searchesPerWorker);
+    const opsPerSecond = totalOps / (elapsedMs / 1000);
+    console.log(`\n[v0.2 concurrency] workers=${workers} writes=${workers * writesPerWorker} searches=${workers * searchesPerWorker} elapsed=${elapsedMs.toFixed(1)}ms ops/s=${opsPerSecond.toFixed(1)} rssDeltaMB=${((rssAfter - rssBefore) / 1024 / 1024).toFixed(1)}`);
     assert.equal(count, workers * writesPerWorker);
     assert.ok(rows.length > 0);
     assert.ok(Number.isFinite(elapsedMs));
