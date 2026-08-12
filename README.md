@@ -28,17 +28,17 @@ The goal is simple:
 
 ## Why SQLite?
 
-The MVP is deliberately local and simple:
+The store is deliberately local and simple:
 
 - one database per project
 - SQLite + FTS5 for fast local retrieval
-- no server
-- no cloud dependency
+- optional local embeddings for semantic retrieval
+- no API key or hosted vector database
 - easy to back up, inspect, move, or delete
 
-Context retrieval currently combines text relevance with importance, recency, and a token budget. The result is a small **Context Pack** that can be given to an agent.
+The default semantic model runs locally through ONNX. The model is downloaded once on first semantic use and cached locally; inference does not call an embedding API. Quantized `q8` inference is used by default to keep resource usage low.
 
-## MVP
+## v0.1 retrieval
 
 ```text
 remember → SQLite
@@ -54,7 +54,43 @@ remember → SQLite
        Claude / Codex
 ```
 
-MCP is the integration boundary, so the same store can be shared by different coding agents.
+## v0.2-alpha retrieval
+
+Semantic retrieval is deliberately modular. FTS5 remains responsible for exact terms such as API names, symbols, error codes, and file names; local embeddings add fuzzy semantic matching.
+
+```text
+                 Query
+                   │
+          ┌────────┴────────┐
+          ↓                 ↓
+        FTS5        Local Embedding
+     lexical match   semantic match
+          │                 │
+          └────────┬────────┘
+                   ↓
+             Hybrid Ranking
+                   ↓
+              Token Budget
+                   ↓
+              Context Pack
+```
+
+The first alpha keeps the vector side intentionally simple:
+
+- local ONNX embedding model
+- 384-dimensional vectors by default
+- SQLite BLOB persistence
+- cosine similarity in-process
+- FTS5 + semantic hybrid ranking
+- no separate vector database
+
+`ctx context` keeps the v0.1 path by default. Use `--semantic` to enable the v0.2-alpha hybrid path:
+
+```bash
+ctx context "fix authentication refresh race" --semantic
+```
+
+The semantic path lazily indexes missing embeddings. Subsequent queries reuse the stored vectors.
 
 ## Quick start
 
@@ -123,14 +159,6 @@ Recommended types:
 - `observation` — something discovered during development.
 - `note` — general durable context.
 
-Examples:
-
-```bash
-ctx remember "Auth state uses Zustand" --type decision --importance 0.9
-ctx remember "Do not change the public auth API" --type constraint --importance 1
-ctx remember "Refresh requests can race" --type observation --importance 0.8
-```
-
 ### `ctx search <query>`
 
 Search stored context using SQLite FTS5 full-text search.
@@ -155,18 +183,18 @@ Build a task-oriented **Context Pack**. This is the main retrieval command.
 ctx context "fix authentication refresh race"
 ```
 
-The store searches the project context, ranks relevant results using text relevance, importance, and recency, then stops when the approximate token budget is reached.
-
 Options:
 
 | Option | Default | Meaning |
 |---|---:|---|
 | `-b, --budget <number>` | `8000` | Approximate maximum number of tokens to include in the returned Context Pack. |
+| `--semantic` | off | Add local embedding retrieval and hybrid ranking. No embedding API is used. |
 
 Examples:
 
 ```bash
 ctx context "fix authentication refresh race"
+ctx context "fix authentication refresh race" --semantic
 ctx context "refactor payment service" --budget 4000
 ```
 
@@ -205,8 +233,6 @@ Show the latest snapshot for the current project.
 ctx show-snapshot
 ```
 
-No options.
-
 ### `ctx mcp`
 
 Start the local MCP server for Claude Code, Codex, or another MCP-compatible agent.
@@ -217,17 +243,43 @@ ctx mcp
 
 The server uses the current working directory as the project and `.context/context.db` as its database.
 
-## Claude Code / Codex
+## Tests and performance
 
-Register `ctx mcp` as a local MCP server. The agent can then use:
+The project uses Node's built-in test runner. Every regression should become a test before the implementation is changed.
 
-```text
-context_get       retrieve relevant context for a task
-context_remember  save durable project context
-context_snapshot  save a resume/handoff checkpoint
+```bash
+npm test
 ```
 
-Claude and Codex do not need to share their conversations. They share the project's context database.
+v0.2 tests are split by concern:
+
+```text
+test/v02/
+├── embedding.test.js             embedding contract
+├── vector.test.js                cosine + top-k
+├── embedding-persistence.test.js SQLite vector persistence
+├── hybrid.test.js                ranking and merge behavior
+├── hybrid-context.test.js        end-to-end hybrid retrieval
+└── concurrency.test.js           randomized SQLite concurrency
+```
+
+The concurrency test uses random data and reports elapsed time, operations/second, and RSS delta. The load can be changed without editing the test:
+
+```bash
+LCS_CONCURRENCY_WORKERS=8 LCS_CONCURRENCY_WRITES=1000 LCS_CONCURRENCY_SEARCHES=1000 npm test
+```
+
+The goal is not to establish a universal benchmark. It is to let developers measure the behavior on their own hardware.
+
+## Claude Code / Codex
+
+Register `ctx mcp` as a local MCP server. The agent can then use the project's persistent context without sharing conversation history.
+
+```text
+Claude Code ─┐
+Codex ───────┼──> .context/context.db
+Other Agents ┘
+```
 
 ## Development roadmap
 
@@ -243,11 +295,11 @@ Claude and Codex do not need to share their conversations. They share the projec
 
 ### v0.2 — Better retrieval
 
-- hybrid FTS5 + semantic/vector search
-- better ranking
-- context lifecycle / expiration
-- file and code-symbol awareness
-- improved handoff and resume
+- local embeddings
+- FTS5 + semantic hybrid search
+- better ranking and retrieval regression data
+- performance and concurrency testing
+- keep the local SQLite architecture
 
 ### v0.3 — Automatic context
 
@@ -272,9 +324,7 @@ The roadmap should be driven by real coding-agent usage rather than by adding in
 
 ## Status
 
-Early MVP. The first question we want to answer is:
-
-> Can a developer switch between Claude Code, Codex, and sessions with materially less re-explanation because the project keeps its own context?
+v0.2-alpha is experimental. The primary question is whether local hybrid retrieval gives materially better Context Packs without making the developer's machine feel the cost.
 
 ## License
 
