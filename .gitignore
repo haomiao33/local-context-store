@@ -1,0 +1,5 @@
+node_modules/
+.context/
+coverage/
+*.log
+.DS_Store
