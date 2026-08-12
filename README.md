@@ -1,191 +1,152 @@
 # Local Context Store
 
-> Your context. Any coding agent.
+> **Local Context Store for Coding Agents**
 
-A local-first context store for coding agents such as **Claude Code, Codex, Cursor, Gemini CLI, and other MCP-compatible agents**.
+A local-first context layer for Claude Code, Codex, and other coding agents.
 
-The MVP has one job: **keep useful project context outside any single agent session, then retrieve only what the next task needs.**
+## What problem does it solve?
 
-## Why
+AI coding agents are good at the current conversation, but useful project knowledge is often trapped in one session, one agent, or a collection of Markdown files.
 
-Coding-agent conversations are ephemeral and agent-specific. Decisions, constraints, failed approaches, and active work get lost when a session ends or when you switch from Claude Code to Codex.
-
-Local Context Store keeps durable context in one project-local SQLite database:
+Local Context Store gives the **project** its own persistent context:
 
 ```text
 Claude Code ─┐
 Codex ───────┼── MCP ── Local Context Store ── .context/context.db
-Cursor ──────┤
-Gemini ──────┘
+Other Agents ┘
 ```
 
-The database belongs to the **project**, not to the agent.
+It focuses on three things:
+
+- **Remember** — save important decisions, constraints, facts, observations, and tasks.
+- **Retrieve** — given a coding task, find the most relevant context instead of dumping everything into the prompt.
+- **Resume** — save a lightweight snapshot so another agent or another session can continue the work.
+
+The goal is simple:
+
+> **Make project context portable across coding agents and sessions.**
+
+## Why SQLite?
+
+The MVP is deliberately local and simple:
+
+- one database per project
+- SQLite + FTS5 for fast local retrieval
+- no server
+- no cloud dependency
+- easy to back up, inspect, move, or delete
+
+Context retrieval currently combines text relevance with importance, recency, and a token budget. The result is a small **Context Pack** that can be given to an agent.
 
 ## MVP
 
-- Local SQLite + WAL
-- FTS5 keyword retrieval
-- Project-scoped context items
-- Importance + recency ranking
-- Token-budgeted task context packs
-- Snapshots for resume / handoff
-- MCP server over stdio
-- Small `ctx` CLI
-- GitHub Actions CI on Node 20/22/24
+```text
+remember → SQLite
+             ↓
+          FTS5 search
+             ↓
+       relevance ranking
+             ↓
+        token budget
+             ↓
+        Context Pack
+             ↓
+       Claude / Codex
+```
 
-Not in v0.1: embeddings, vector databases, graph memory, cloud sync, automatic conversation parsing, or agent-specific hooks.
+MCP is the integration boundary, so the same store can be shared by different coding agents.
 
-## Requirements
-
-- Node.js 20+
-- npm
-
-## Install from source
+## Quick start
 
 ```bash
 git clone https://github.com/haomiao33/local-context-store.git
 cd local-context-store
 npm install
+npm test
 npm link
 ```
 
-## Basic CLI
-
-Run these commands from a coding project:
+Inside a project:
 
 ```bash
 ctx init
-ctx remember "Auth state uses Zustand" --type decision --importance 0.9
-ctx remember "Public auth API must not change" --type constraint --importance 0.9
-ctx remember "Refresh race happens when requests overlap" --type observation
 
-ctx search "authentication refresh"
-ctx context "fix authentication refresh race" --budget 4000
-ctx snapshot "Fix authentication refresh race" --task "fix authentication refresh race"
-ctx show-snapshot
+ctx remember "Auth state uses Zustand" --type decision --importance 0.9
+ctx remember "Public auth API must not change" --type constraint --importance 1
+
+ctx context "fix authentication refresh race"
 ```
 
-The default database is:
+The database is created at:
 
 ```text
 <project>/.context/context.db
 ```
 
-`.context/` is ignored by Git.
+## Claude Code / Codex
 
-## MCP
-
-The MCP server is a local stdio process:
+The store exposes an MCP server:
 
 ```bash
 ctx mcp
 ```
 
-It exposes three tools:
-
-- `context_get` — retrieve relevant project context for a coding task
-- `context_remember` — persist a durable fact/decision/task/constraint/observation/note
-- `context_snapshot` — create a compact checkpoint for resume or handoff
-
-### Codex
-
-With a globally installed `ctx` command:
-
-```bash
-codex mcp add local-context-store -- ctx mcp
-```
-
-### Claude Code
-
-Add a local MCP server using the Claude Code MCP configuration/CLI and point the command at:
+Register that command as a local MCP server in Claude Code or Codex. The agent can then use:
 
 ```text
-ctx mcp
+context_get
+context_remember
+context_snapshot
 ```
 
-If `ctx` is not on PATH, use the absolute path to the repository's CLI or Node executable.
+The important part is that **Claude and Codex do not need to share their conversations**. They share the project's context database.
 
-## Intended workflow
+## Development roadmap
 
-### Agent A starts work
+### v0.1 — Local Context Store
 
-```text
-context_get("fix auth refresh race")
-```
+- SQLite persistence
+- FTS5 retrieval
+- relevance + importance + recency ranking
+- token-budgeted context packs
+- snapshots
+- MCP integration
+- Claude Code / Codex testing
 
-The store returns only relevant durable context.
+### v0.2 — Better retrieval
 
-### Agent A makes an important decision
+- hybrid FTS5 + semantic/vector search
+- better ranking
+- context lifecycle / expiration
+- file and code-symbol awareness
+- improved handoff and resume
 
-```text
-context_remember(
-  type="decision",
-  content="Refresh uses a single-flight lock"
-)
-```
+### v0.3 — Automatic context
 
-### Agent A stops
+- automatic context extraction from agent sessions
+- automatic remember of important decisions and constraints
+- automatic task bootstrap
+- automatic snapshots
+- agent hooks where useful
 
-```text
-context_snapshot("Fix auth refresh race")
-```
+### Future
 
-### Agent B continues tomorrow
+- richer project knowledge model
+- optional local UI
+- sync / team sharing
+- more coding-agent integrations
 
-```text
-context_get("continue auth refresh")
-```
+The roadmap should be driven by real coding-agent usage rather than by adding infrastructure for its own sake.
 
-Agent B sees the same project context without needing Agent A's full conversation history.
+## Core principle
 
-## Data model
-
-The MVP intentionally has only three durable concepts:
-
-```text
-items       durable project knowledge
-sessions    where an item came from
-snapshots   resumable project state
-```
-
-Item types:
-
-```text
-fact
-decision
-task
-constraint
-observation
-note
-```
-
-The goal is a stable **agent-neutral context layer**, not a general-purpose AI memory system.
-
-## Design principles
-
-1. **Project owns context.** Agents are producers and consumers.
-2. **Persist selectively.** Do not mirror every conversation message.
-3. **Retrieve for the task.** `context_get` is a task-oriented context pack, not a memory dump.
-4. **Stay local.** One SQLite file is easy to inspect, back up, move, and delete.
-5. **Stay agent-neutral.** Stored data does not depend on Claude or Codex internals.
-6. **MCP is the integration boundary.** Adding another coding agent should not require a database migration.
-
-## Development
-
-```bash
-npm install
-npm test
-```
-
-CI runs the test suite against Node.js 20, 22, and 24.
+**The agent owns the reasoning. The project owns the context.**
 
 ## Status
 
-Early MVP for real-world testing. The first validation target is simple:
+Early MVP. The first question we want to answer is:
 
-> Can a developer work in Claude Code, stop, switch to Codex, and continue with materially less re-explanation because both agents share the same local project context?
-
-Feedback from actual coding sessions should drive the next schema and retrieval iterations.
+> Can a developer switch between Claude Code, Codex, and sessions with materially less re-explanation because the project keeps its own context?
 
 ## License
 
