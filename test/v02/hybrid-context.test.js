@@ -10,15 +10,32 @@ function createProject() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'lcs-hybrid-'));
 }
 
+function createTestEmbeddingProvider() {
+  const vectors = new Map([
+    ['fix authentication refresh concurrency', [1, 1, 0, 0]],
+    ['Public auth API must not change', [1, 0.8, 0, 0]],
+    ['Authentication renewal has a concurrency issue', [1, 1, 0, 0]],
+    ['CSS grid dashboard layout', [0, 0, 1, 1]],
+  ]);
+  return {
+    model: 'test-fixture-v1',
+    dimensions: 4,
+    async embed(text) {
+      if (vectors.has(text)) return vectors.get(text);
+      return [0, 0, 0, 1];
+    },
+  };
+}
+
 test('contextAsync combines lexical and semantic retrieval', async () => {
   const projectDir = createProject();
   const projectId = path.resolve(projectDir);
   const store = createStore(projectDir);
-  const embeddingProvider = createEmbeddingProvider({ backend: 'hash', model: 'test-hash-v1', dimensions: 256 });
+  const embeddingProvider = createTestEmbeddingProvider();
   try {
     const lexical = store.remember({ projectId, type: 'constraint', content: 'Public auth API must not change', importance: 1 });
     const semantic = store.remember({ projectId, type: 'observation', content: 'Authentication renewal has a concurrency issue', importance: 0.8 });
-    store.remember({ projectId, type: 'note', content: 'CSS grid dashboard layout' });
+    const unrelated = store.remember({ projectId, type: 'note', content: 'CSS grid dashboard layout' });
 
     const result = await store.contextAsync({
       projectId,
@@ -30,7 +47,7 @@ test('contextAsync combines lexical and semantic retrieval', async () => {
     const ids = result.items.map(item => item.id);
     assert.ok(ids.includes(semantic.id));
     assert.ok(ids.includes(lexical.id));
-    assert.ok(!ids.includes(result.items.find(item => item.content.includes('CSS grid'))?.id ?? 'never'));
+    assert.ok(!ids.includes(unrelated.id));
     assert.ok(result.items.every(item => Number.isFinite(item.score)));
   } finally {
     store.close();
