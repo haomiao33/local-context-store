@@ -1,1 +1,15 @@
-
+{
+  "name": "local-context-store",
+  "version": "0.1.0",
+  "description": "A local-first context store for coding agents such as Claude Code and Codex.",
+  "type": "module",
+  "bin": { "ctx": "./src/cli.js" },
+  "scripts": { "test": "node --test", "start": "node src/cli.js" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.5",
+    "better-sqlite3": "^12.4.1",
+    "commander": "^14.0.0"
+  },
+  "engines": { "node": ">=20" },
+  "license": "MIT"
+}
