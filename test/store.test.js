@@ -35,30 +35,40 @@ test('search matches any query token and returns relevant context', () => withSt
   assert.equal(rows[0].id, item.id);
 }));
 
-test('context falls back across task tokens when full task has no exact FTS match', () => withStore((store, projectId) => {
+test('context retrieves relevant items for a coding task', () => withStore((store, projectId) => {
   const constraint = store.remember({ projectId, type: 'constraint', content: 'Public auth API must not change', importance: 1 });
   const observation = store.remember({ projectId, type: 'observation', content: 'Refresh requests can race', importance: 0.8 });
   const decision = store.remember({ projectId, type: 'decision', content: 'Auth state uses Zustand', importance: 0.9 });
+  store.remember({ projectId, type: 'note', content: 'React component architecture' });
+
   const result = store.context({ projectId, task: 'fix authentication refresh race', budget: 8000 });
   const ids = result.items.map(item => item.id);
+
   assert.ok(ids.includes(constraint.id));
   assert.ok(ids.includes(observation.id));
   assert.ok(ids.includes(decision.id));
+  assert.ok(!ids.includes(undefined));
   assert.ok(result.items.length > 0);
 }));
 
-test('context applies a token budget', () => withStore((store, projectId) => {
+test('context falls back to per-token retrieval when the full task has no results', () => withStore((store, projectId) => {
+  const item = store.remember({ projectId, type: 'observation', content: 'Refresh requests can race', importance: 0.8 });
+  const result = store.context({ projectId, task: 'zzzzzz refresh', budget: 8000 });
+  assert.ok(result.items.some(candidate => candidate.id === item.id));
+}));
+
+test('context respects a token budget for normal-sized items', () => withStore((store, projectId) => {
   for (let i = 0; i < 20; i++) {
     store.remember({ projectId, type: 'note', content: `authentication refresh detail ${i}`, importance: i / 20 });
   }
-  const result = store.context({ projectId, task: 'authentication refresh', budget: 100 });
+  const result = store.context({ projectId, task: 'authentication refresh', budget: 40 });
   assert.ok(result.items.length > 0);
-  assert.ok(result.tokenCount <= 100);
+  assert.ok(result.tokenCount <= 40);
 }));
 
-test('importance is bounded to 0..1', () => withStore((store, projectId) => {
-  assert.equal(store.remember({ projectId, content: 'low', importance: -2 }).importance, 0);
-  assert.equal(store.remember({ projectId, content: 'high', importance: 2 }).importance, 1);
+test('importance outside 0..1 is rejected', () => withStore((store, projectId) => {
+  assert.throws(() => store.remember({ projectId, content: 'low', importance: -2 }), /importance must be a number between 0 and 1/);
+  assert.throws(() => store.remember({ projectId, content: 'high', importance: 2 }), /importance must be a number between 0 and 1/);
 }));
 
 test('invalid context type is rejected', () => withStore((store, projectId) => {
