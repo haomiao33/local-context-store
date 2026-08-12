@@ -83,23 +83,151 @@ The database is created at:
 <project>/.context/context.db
 ```
 
-## Claude Code / Codex
+## CLI reference
 
-The store exposes an MCP server:
+Run `ctx --help` or `ctx <command> --help` for the same information in the terminal.
+
+### `ctx init`
+
+Initialize the current project. Creates the local SQLite database at `.context/context.db`.
+
+```bash
+ctx init
+```
+
+No options.
+
+### `ctx remember <content>`
+
+Save a piece of durable project context.
+
+```bash
+ctx remember "Auth uses Zustand" \
+  --type decision \
+  --importance 0.9
+```
+
+Options:
+
+| Option | Default | Meaning |
+|---|---:|---|
+| `-t, --type <type>` | `note` | Context type. One of `fact`, `decision`, `task`, `constraint`, `observation`, `note`. |
+| `-i, --importance <number>` | `0.5` | Importance from `0` (low) to `1` (critical). Used when ranking context. |
+
+Recommended types:
+
+- `fact` — stable project knowledge.
+- `decision` — a technical or product decision already made.
+- `task` — work that needs to be done or continued.
+- `constraint` — something the agent must not violate.
+- `observation` — something discovered during development.
+- `note` — general durable context.
+
+Examples:
+
+```bash
+ctx remember "Auth state uses Zustand" --type decision --importance 0.9
+ctx remember "Do not change the public auth API" --type constraint --importance 1
+ctx remember "Refresh requests can race" --type observation --importance 0.8
+```
+
+### `ctx search <query>`
+
+Search stored context using SQLite FTS5 full-text search.
+
+```bash
+ctx search "authentication refresh"
+```
+
+Options:
+
+| Option | Default | Meaning |
+|---|---:|---|
+| `-l, --limit <number>` | `20` | Maximum number of matching records to return. |
+
+Use this when you want to inspect the stored context directly.
+
+### `ctx context <task>`
+
+Build a task-oriented **Context Pack**. This is the main retrieval command.
+
+```bash
+ctx context "fix authentication refresh race"
+```
+
+The store searches the project context, ranks relevant results using text relevance, importance, and recency, then stops when the approximate token budget is reached.
+
+Options:
+
+| Option | Default | Meaning |
+|---|---:|---|
+| `-b, --budget <number>` | `8000` | Approximate maximum number of tokens to include in the returned Context Pack. |
+
+Examples:
+
+```bash
+ctx context "fix authentication refresh race"
+ctx context "refactor payment service" --budget 4000
+```
+
+The important distinction:
+
+```text
+ctx search
+    = inspect search results
+
+ctx context
+    = prepare the context an AI agent actually needs
+```
+
+### `ctx snapshot <title>`
+
+Save a lightweight checkpoint for resuming work or handing work to another agent.
+
+```bash
+ctx snapshot "Auth refresh handoff" \
+  --task "fix auth refresh" \
+  --goal "preserve the public API"
+```
+
+Options:
+
+| Option | Default | Meaning |
+|---|---:|---|
+| `-t, --task <task>` | none | Current task. Relevant context is included in the snapshot. |
+| `-g, --goal <goal>` | none | Goal or intended outcome of the work. |
+
+### `ctx show-snapshot`
+
+Show the latest snapshot for the current project.
+
+```bash
+ctx show-snapshot
+```
+
+No options.
+
+### `ctx mcp`
+
+Start the local MCP server for Claude Code, Codex, or another MCP-compatible agent.
 
 ```bash
 ctx mcp
 ```
 
-Register that command as a local MCP server in Claude Code or Codex. The agent can then use:
+The server uses the current working directory as the project and `.context/context.db` as its database.
+
+## Claude Code / Codex
+
+Register `ctx mcp` as a local MCP server. The agent can then use:
 
 ```text
-context_get
-context_remember
-context_snapshot
+context_get       retrieve relevant context for a task
+context_remember  save durable project context
+context_snapshot  save a resume/handoff checkpoint
 ```
 
-The important part is that **Claude and Codex do not need to share their conversations**. They share the project's context database.
+Claude and Codex do not need to share their conversations. They share the project's context database.
 
 ## Development roadmap
 
