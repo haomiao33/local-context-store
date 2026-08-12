@@ -218,114 +218,55 @@ ctx snapshot "Auth refresh handoff" \
   --goal "preserve the public API"
 ```
 
-Options:
+## v0.2 benchmark
 
-| Option | Default | Meaning |
-|---|---:|---|
-| `-t, --task <task>` | none | Current task. Relevant context is included in the snapshot. |
-| `-g, --goal <goal>` | none | Goal or intended outcome of the work. |
-
-### `ctx show-snapshot`
-
-Show the latest snapshot for the current project.
+The repository includes a repeatable local benchmark for the retrieval path. It creates temporary deterministic databases, measures FTS5 and Context Pack latency at different corpus sizes, and measures in-memory vector search separately.
 
 ```bash
-ctx show-snapshot
+npm run benchmark
 ```
 
-### `ctx mcp`
+Default corpus sizes:
 
-Start the local MCP server for Claude Code, Codex, or another MCP-compatible agent.
-
-```bash
-ctx mcp
+```text
+1,000
+10,000
+100,000 context items
 ```
 
-The server uses the current working directory as the project and `.context/context.db` as its database.
+Useful options:
 
-## Tests and performance
+```bat
+set LCS_BENCH_SIZES=1000,10000,100000
+set LCS_BENCH_QUERIES=30
+set LCS_BENCH_VECTOR_DIMS=32
+npm run benchmark
+```
 
-The project uses Node's built-in test runner. Every regression should become a test before the implementation is changed.
+To measure the actual local ONNX embedding model, including cold start, warm latency, and RSS growth:
+
+```bat
+set LCS_BENCH_LOCAL_EMBED=1
+npm run benchmark
+```
+
+The important numbers are:
+
+- **FTS p50 / p95** — lexical retrieval latency.
+- **Context p50 / p95** — time to construct the token-budgeted Context Pack.
+- **Vector p50 / p95** — in-memory semantic candidate scan latency.
+- **Cold embedding** — first local model inference, including model initialization.
+- **Warm embedding p50 / p95** — repeated local inference after initialization.
+- **RSS delta** — approximate process memory increase during local embedding initialization.
+
+This benchmark is intentionally not a synthetic promise of production performance. Run it on the machines that matter. The target is simple: **fast local retrieval, low resource usage, and predictable latency as the context store grows.**
+
+## Development
+
+Run the full regression suite:
 
 ```bash
 npm test
 ```
 
-v0.2 tests are split by concern:
-
-```text
-test/v02/
-├── embedding.test.js             embedding contract
-├── vector.test.js                cosine + top-k
-├── embedding-persistence.test.js SQLite vector persistence
-├── hybrid.test.js                ranking and merge behavior
-├── hybrid-context.test.js        end-to-end hybrid retrieval
-└── concurrency.test.js           randomized SQLite concurrency
-```
-
-The concurrency test uses random data and reports elapsed time, operations/second, and RSS delta. The load can be changed without editing the test:
-
-```bash
-LCS_CONCURRENCY_WORKERS=8 LCS_CONCURRENCY_WRITES=1000 LCS_CONCURRENCY_SEARCHES=1000 npm test
-```
-
-The goal is not to establish a universal benchmark. It is to let developers measure the behavior on their own hardware.
-
-## Claude Code / Codex
-
-Register `ctx mcp` as a local MCP server. The agent can then use the project's persistent context without sharing conversation history.
-
-```text
-Claude Code ─┐
-Codex ───────┼──> .context/context.db
-Other Agents ┘
-```
-
-## Development roadmap
-
-### v0.1 — Local Context Store
-
-- SQLite persistence
-- FTS5 retrieval
-- relevance + importance + recency ranking
-- token-budgeted context packs
-- snapshots
-- MCP integration
-- Claude Code / Codex testing
-
-### v0.2 — Better retrieval
-
-- local embeddings
-- FTS5 + semantic hybrid search
-- better ranking and retrieval regression data
-- performance and concurrency testing
-- keep the local SQLite architecture
-
-### v0.3 — Automatic context
-
-- automatic context extraction from agent sessions
-- automatic remember of important decisions and constraints
-- automatic task bootstrap
-- automatic snapshots
-- agent hooks where useful
-
-### Future
-
-- richer project knowledge model
-- optional local UI
-- sync / team sharing
-- more coding-agent integrations
-
-The roadmap should be driven by real coding-agent usage rather than by adding infrastructure for its own sake.
-
-## Core principle
-
-**The agent owns the reasoning. The project owns the context.**
-
-## Status
-
-v0.2-alpha is experimental. The primary question is whether local hybrid retrieval gives materially better Context Packs without making the developer's machine feel the cost.
-
-## License
-
-MIT
+The v0.2 test suite covers persistence, FTS5 retrieval, token budgets, local embeddings, embedding persistence/invalidation, hybrid ranking, SQLite retry behavior, concurrent database initialization, and multi-process concurrent readers/writers.
