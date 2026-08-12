@@ -7,6 +7,18 @@ const id = () => crypto.randomUUID();
 
 export const ITEM_TYPES = ['fact','decision','task','constraint','observation','note'];
 
+function queryTokens(query) {
+  return query.trim().split(/\s+/)
+    .map(x => x.replace(/[^\p{L}\p{N}_-]/gu, ''))
+    .filter(Boolean);
+}
+
+function ftsQuery(query) {
+  return queryTokens(query)
+    .map(t => `"${t.replaceAll('"', '""')}"*`)
+    .join(' OR ');
+}
+
 export class ContextStore {
   constructor(db) { this.db = db; }
 
@@ -23,7 +35,8 @@ export class ContextStore {
     if (!ITEM_TYPES.includes(type)) throw new Error(`invalid type: ${type}`);
     const itemId = id();
     const timestamp = now();
-    const score = Math.max(0, Math.min(1, Number(importance)));
+    const score = Number(importance);
+    if (!Number.isFinite(score) || score < 0 || score > 1) throw new Error('importance must be a number between 0 and 1');
     this.db.prepare(`INSERT INTO items(id, project_id, session_id, type, content, importance, created_at, updated_at, source_agent, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(itemId, projectId, sessionId, type, content.trim(), score, timestamp, timestamp, agent, JSON.stringify(metadata));
     this.db.prepare(`INSERT INTO items_fts(id, project_id, content, type) VALUES (?, ?, ?, ?)`)
@@ -37,9 +50,8 @@ export class ContextStore {
 
   search({ projectId, query, limit = 20 }) {
     if (!query?.trim()) return this.db.prepare('SELECT * FROM items WHERE project_id = ? ORDER BY updated_at DESC LIMIT ?').all(projectId, limit);
-    const tokens = query.trim().split(/\s+/).map(x => x.replace(/[^\p{L}\p{N}_-]/gu, '')).filter(Boolean);
-    if (!tokens.length) return [];
-    const match = tokens.map(t => `"${t.replaceAll('"', '""')}"*`).join(' OR ');
+    const match = ftsQuery(query);
+    if (!match) return [];
     return this.db.prepare(`
       SELECT i.*, bm25(items_fts) AS fts_rank
       FROM items_fts
@@ -51,12 +63,26 @@ export class ContextStore {
   }
 
   context({ projectId, task, budget = 8000, limit = 50 }) {
-    const candidates = this.search({ projectId, query: task, limit });
+    const primary = this.search({ projectId, query: task, limit });
+    const byId = new Map(primary.map(item => [item.id, item]));
+
+    // Fallback to per-term retrieval so a task still produces useful context
+    // when a multi-term FTS query returns no rows.
+    if (!primary.length) {
+      for (const token of queryTokens(task)) {
+        for (const item of this.search({ projectId, query: token, limit })) {
+          byId.set(item.id, item);
+        }
+      }
+    }
+
+    const candidates = [...byId.values()].slice(0, limit);
     const nowMs = Date.now();
     const ranked = candidates.map(item => {
       const ageDays = Math.max(0, (nowMs - Date.parse(item.updated_at)) / 86400000);
       const recency = 1 / (1 + ageDays / 30);
-      const lexical = 1 / (1 + Math.max(0, Number(item.fts_rank) || 0));
+      const bm25 = Number(item.fts_rank);
+      const lexical = Number.isFinite(bm25) ? 1 / (1 + Math.max(0, bm25)) : 0;
       return { ...item, score: lexical * 0.55 + item.importance * 0.30 + recency * 0.15 };
     }).sort((a,b) => b.score - a.score);
 
