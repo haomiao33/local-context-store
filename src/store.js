@@ -88,7 +88,11 @@ export class ContextStore {
   getEmbedding(itemId, contentHash = null, model = null) {
     const row = this.db.prepare('SELECT * FROM item_embeddings WHERE item_id = ?').get(itemId);
     if (!row || (contentHash && row.content_hash !== contentHash) || (model && row.model !== model)) return null;
-    return { ...row, vector: decodeVector(row.vector) };
+    return {
+      ...row,
+      contentHash: row.content_hash,
+      vector: decodeVector(row.vector),
+    };
   }
 
   async indexEmbeddings({ projectId, embeddingProvider = getEmbeddingProvider() } = {}) {
@@ -104,7 +108,7 @@ export class ContextStore {
     return { indexed, total: items.length };
   }
 
-  async contextAsync({ projectId, task, budget = 8000, limit = 50, embeddingProvider = getEmbeddingProvider(), weights } = {}) {
+  async contextAsync({ projectId, task, budget = 8000, limit = 50, semanticThreshold = 0.2, embeddingProvider = getEmbeddingProvider(), weights } = {}) {
     if (!task?.trim()) return { projectId, task, tokenCount: 0, items: [] };
     await this.indexEmbeddings({ projectId, embeddingProvider });
 
@@ -128,7 +132,8 @@ export class ContextStore {
       vector: decodeVector(row.vector_blob),
       importance: row.importance,
       recency: recencyScore(row.updated_at),
-    })), Math.max(limit, 50));
+    })), Math.max(limit, 50))
+      .filter(item => item.semanticScore >= semanticThreshold);
 
     const lexical = [...lexicalById.values()].map(item => ({
       ...item,
