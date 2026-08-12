@@ -8,6 +8,7 @@
   "scripts": {
     "build": "node --check src/db.js && node --check src/store.js && node --check src/vector.js && node --check src/embedding.js && node --check src/hybrid.js && node --check src/cli.js && node --check src/mcp.js",
     "test": "node --test",
+    "benchmark": "node benchmark/v02.js",
     "start": "node src/cli.js"
   },
   "dependencies": {
