@@ -12,10 +12,11 @@ test('hybrid ranking merges lexical and semantic candidates', () => {
       { id: 'semantic', semanticScore: 0.98, importance: 0.5, recency: 0.5 },
       { id: 'exact', semanticScore: 0.7, importance: 0.5, recency: 0.5 },
     ],
-    weights: { lexical: 0.35, semantic: 0.45, importance: 0.15, recency: 0.05 },
+    weights: { lexical: 0.2, semantic: 0.7, importance: 0.05, recency: 0.05 },
   });
   assert.equal(new Set(rows.map(row => row.id)).size, 3);
   assert.ok(rows.find(row => row.id === 'exact'));
+  assert.ok(rows.find(row => row.id === 'semantic'));
   assert.equal(rows[0].id, 'semantic');
 });
 
