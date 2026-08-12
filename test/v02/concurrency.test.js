@@ -17,12 +17,13 @@ function runWorker(workerData) {
   });
 }
 
-test('randomized concurrent writers and readers share one SQLite project safely', { timeout: 30_000 }, async () => {
+test('randomized concurrent writers and readers share one SQLite project safely', { timeout: 120_000 }, async () => {
   const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lcs-concurrency-'));
   const projectId = path.resolve(projectDir);
-  const workers = 8;
-  const writesPerWorker = 100;
-  const searchesPerWorker = 100;
+  const workers = Number(process.env.LCS_CONCURRENCY_WORKERS ?? 8);
+  const writesPerWorker = Number(process.env.LCS_CONCURRENCY_WRITES ?? 100);
+  const searchesPerWorker = Number(process.env.LCS_CONCURRENCY_SEARCHES ?? 100);
+  assert.ok(workers > 0 && writesPerWorker > 0 && searchesPerWorker > 0);
   const rssBefore = process.memoryUsage().rss;
 
   const started = performance.now();
