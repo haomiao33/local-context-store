@@ -153,7 +153,6 @@ export class ContextStore {
     }));
 
     const ranked = hybridRank({ lexical, semantic, weights });
-    const rankedIds = ranked.map(item => item.id);
     const missingContentIds = ranked.filter(item => !item.content).map(item => item.id);
     if (missingContentIds.length) {
       const placeholders = missingContentIds.map(() => '?').join(',');
