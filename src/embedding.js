@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { cosineSimilarity } from './vector.js';
-import { DEFAULT_MODEL, getModelBaseDir } from './model.js';
+import { DEFAULT_MODEL, DEFAULT_DTYPE, getModelBaseDir } from './model.js';
 
 const DEFAULT_DIMENSIONS = 384;
 const providers = new Map();
@@ -34,7 +34,7 @@ function hashEmbedding(text, dimensions) {
   return Array.from(normalize(Array.from(vector)));
 }
 
-async function createLocalPipeline({ model, dtype = 'q8' }) {
+async function createLocalPipeline({ model, dtype = DEFAULT_DTYPE }) {
   const { env, pipeline } = await import('@huggingface/transformers');
   env.localModelPath = getModelBaseDir();
   env.allowLocalModels = true;
@@ -46,7 +46,7 @@ export function createEmbeddingProvider({
   model = DEFAULT_MODEL,
   dimensions = DEFAULT_DIMENSIONS,
   backend = 'local',
-  dtype = 'q8',
+  dtype = DEFAULT_DTYPE,
   pipelineFactory = createLocalPipeline,
 } = {}) {
   let pipelinePromise = null;
@@ -61,7 +61,7 @@ export function createEmbeddingProvider({
     return Array.from(output.data);
   }
 
-  return { model, dimensions, backend, embed, similarity: cosineSimilarity };
+  return { model, dimensions, backend, dtype, embed, similarity: cosineSimilarity };
 }
 
 export function getEmbeddingProvider(options = {}) {
@@ -69,7 +69,7 @@ export function getEmbeddingProvider(options = {}) {
     model: options.model ?? DEFAULT_MODEL,
     dimensions: options.dimensions ?? DEFAULT_DIMENSIONS,
     backend: options.backend ?? 'local',
-    dtype: options.dtype ?? 'q8',
+    dtype: options.dtype ?? DEFAULT_DTYPE,
   });
   if (!providers.has(key)) providers.set(key, createEmbeddingProvider(options));
   return providers.get(key);
@@ -77,3 +77,4 @@ export function getEmbeddingProvider(options = {}) {
 
 export const DEFAULT_EMBEDDING_MODEL = DEFAULT_MODEL;
 export const DEFAULT_EMBEDDING_DIMENSIONS = DEFAULT_DIMENSIONS;
+export const DEFAULT_EMBEDDING_DTYPE = DEFAULT_DTYPE;
