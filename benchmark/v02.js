@@ -11,6 +11,7 @@ import { hybridRank } from '../src/hybrid.js';
 const sizes = (process.env.LCS_BENCH_SIZES ?? '1000,10000,100000')
   .split(',').map(Number).filter(Number.isInteger).filter(n => n > 0);
 const queries = Number(process.env.LCS_BENCH_QUERIES ?? 30);
+const hybridQueries = Number(process.env.LCS_BENCH_HYBRID_QUERIES ?? 10);
 const semanticMax = Number(process.env.LCS_BENCH_SEMANTIC_MAX ?? 10000);
 const vectorDimensions = Number(process.env.LCS_BENCH_VECTOR_DIMS ?? 32);
 
@@ -164,6 +165,68 @@ async function benchmarkLocalEmbedding() {
   };
 }
 
+async function benchmarkHybrid(dir, size, embeddingProvider) {
+  const store = createStore(dir);
+  const indexStart = performance.now();
+  const indexResult = await store.indexEmbeddings({ projectId: 'bench', embeddingProvider });
+  const indexMs = performance.now() - indexStart;
+
+  // Warm the model and the SQLite/vector path before collecting query timings.
+  await store.contextAsync({
+    projectId: 'bench',
+    task: 'authentication refresh concurrency',
+    budget: 2000,
+    limit: 20,
+    embeddingProvider,
+  });
+
+  const querySet = [
+    'authentication refresh concurrency',
+    'public API must remain stable',
+    'SQLite concurrent local readers writers',
+    'CSS layout grid',
+    'single refresh promise',
+  ];
+  const samples = [];
+  for (let i = 0; i < hybridQueries; i++) {
+    const start = performance.now();
+    await store.contextAsync({
+      projectId: 'bench',
+      task: querySet[i % querySet.length],
+      budget: 2000,
+      limit: 20,
+      embeddingProvider,
+    });
+    samples.push(performance.now() - start);
+  }
+  store.close();
+  return {
+    size,
+    indexed: indexResult.indexed,
+    total: indexResult.total,
+    indexMs,
+    p50: percentile(samples, 50),
+    p95: percentile(samples, 95),
+  };
+}
+
+async function benchmarkSyntheticHybrid() {
+  const lexical = [];
+  const semantic = [];
+  for (let i = 0; i < 1000; i++) {
+    const importance = ((i % 100) + 1) / 100;
+    lexical.push({ id: `h-${i}`, ftsScore: i % 10 === 0 ? 0.9 : 0.1, importance, recency: 0.8 });
+    semantic.push({ id: `h-${i}`, semanticScore: i % 17 === 0 ? 0.95 : 0.05, importance, recency: 0.8 });
+  }
+  const samples = [];
+  for (let i = 0; i < queries; i++) {
+    const start = performance.now();
+    hybridRank({ lexical, semantic });
+    samples.push(performance.now() - start);
+  }
+  return { p50: percentile(samples, 50), p95: percentile(samples, 95) };
+}
+
 async function main() {
   console.log('Local Context Store v0.2 benchmark');
   console.log(`sizes=${sizes.join(',')} queries=${queries} vectorDims=${vectorDimensions}`);
@@ -194,6 +257,11 @@ async function main() {
   }
 
   console.log('');
+  console.log('Synthetic hybrid ranking');
+  const syntheticHybrid = await benchmarkSyntheticHybrid();
+  console.log(`1000 candidates\tp50 ${formatMs(syntheticHybrid.p50)}\tp95 ${formatMs(syntheticHybrid.p95)}`);
+
+  console.log('');
   console.log(`Hybrid/semantic full indexing is capped at ${semanticMax} items in this benchmark to avoid silently creating a huge local embedding workload.`);
   console.log('Use LCS_BENCH_LOCAL_EMBED=1 for the real local model measurement.');
   if (process.env.LCS_BENCH_LOCAL_EMBED === '1') {
@@ -204,6 +272,25 @@ async function main() {
     console.log(`warm embedding p50: ${formatMs(result.warmP50)}`);
     console.log(`warm embedding p95: ${formatMs(result.warmP95)}`);
     console.log(`RSS delta: ${result.rssDeltaMB.toFixed(1)}MB`);
+
+    console.log('');
+    console.log('Hybrid Search Benchmark (local model, warm query path)');
+    console.log('size\tindexed\tindex time\tquery p50\tquery p95');
+    const hybridSizes = sizes.filter(size => size <= semanticMax);
+    if (!hybridSizes.length) {
+      console.log(`no sizes <= ${semanticMax}; set LCS_BENCH_SEMANTIC_MAX to increase the cap`);
+    }
+    for (const size of hybridSizes) {
+      const dir = createBenchDir(size);
+      try {
+        const { db } = seedDatabase(dir, size);
+        db.close();
+        const hybrid = await benchmarkHybrid(dir, size, getEmbeddingProvider({ backend: 'local' }));
+        console.log(`${size}\t${hybrid.indexed}/${hybrid.total}\t${formatMs(hybrid.indexMs)}\t${formatMs(hybrid.p50)}\t${formatMs(hybrid.p95)}`);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    }
   }
 }
 
