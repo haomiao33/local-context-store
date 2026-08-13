@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { openDatabase } from './db.js';
-import { decodeVector, encodeVector, topKSimilar } from './vector.js';
+import { decodeVector, encodeVector } from './vector.js';
 import { getEmbeddingProvider, hashText } from './embedding.js';
 import { hybridRank } from './hybrid.js';
 import { withSqliteRetry } from './sqlite-retry.js';
@@ -101,12 +101,19 @@ export class ContextStore {
 
   async indexEmbeddings({ projectId, embeddingProvider = getEmbeddingProvider() } = {}) {
     const items = this.db.prepare('SELECT id, content FROM items WHERE project_id = ? ORDER BY created_at ASC').all(projectId);
+    const existing = new Map(this.db.prepare(`
+      SELECT item_id, content_hash
+      FROM item_embeddings
+      WHERE model = ?
+    `).all(embeddingProvider.model).map(row => [row.item_id, row.content_hash]));
+
     let indexed = 0;
     for (const item of items) {
       const contentHash = hashText(item.content);
-      if (this.getEmbedding(item.id, contentHash, embeddingProvider.model)) continue;
+      if (existing.get(item.id) === contentHash) continue;
       const vector = await embeddingProvider.embed(item.content);
       this.saveEmbedding({ itemId: item.id, model: embeddingProvider.model, vector, contentHash });
+      existing.set(item.id, contentHash);
       indexed++;
     }
     return { indexed, total: items.length };
@@ -126,18 +133,17 @@ export class ContextStore {
 
     const queryVector = await embeddingProvider.embed(task);
     const rows = this.db.prepare(`
-      SELECT i.*, e.model, e.vector AS vector_blob
+      SELECT i.*
       FROM item_embeddings e
       JOIN items i ON i.id = e.item_id
       WHERE i.project_id = ? AND e.model = ?
     `).all(projectId, embeddingProvider.model);
-    const semantic = topKSimilar(queryVector, rows.map(row => ({
+    const semantic = rows.map(row => ({
       ...row,
-      vector: decodeVector(row.vector_blob),
+      semanticScore: embeddingProvider.similarity(queryVector, decodeVector(row.vector)),
       importance: row.importance,
       recency: recencyScore(row.updated_at),
-    })), Math.max(limit, 50))
-      .filter(item => item.semanticScore >= semanticThreshold);
+    })).filter(item => item.semanticScore >= semanticThreshold);
 
     const lexical = [...lexicalById.values()].map(item => ({
       ...item,
