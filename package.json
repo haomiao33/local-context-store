@@ -3,6 +3,7 @@
   "version": "0.2.0-alpha.2",
   "description": "A local-first context store for coding agents such as Claude Code and Codex.",
   "type": "module",
+<<<<<<< HEAD
   "bin": {
     "ctx": "./src/cli.js"
   },
@@ -12,6 +13,10 @@
     "LICENSE",
     "model"
   ],
+=======
+  "bin": { "ctx": "./src/cli.js" },
+  "files": ["src", "model", "README.md", "LICENSE"],
+>>>>>>> 228040725dceee1edeab64a50a91e2f61194a856
   "scripts": {
     "build": "node --check src/db.js && node --check src/store.js && node --check src/vector.js && node --check src/embedding.js && node --check src/hybrid.js && node --check src/cli.js && node --check src/mcp.js",
     "test": "node --test",
