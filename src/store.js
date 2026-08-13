@@ -100,16 +100,23 @@ export class ContextStore {
   }
 
   async indexEmbeddings({ projectId, embeddingProvider = getEmbeddingProvider() } = {}) {
-    const items = this.db.prepare('SELECT id, content FROM items WHERE project_id = ? ORDER BY created_at ASC').all(projectId);
+    const rows = this.db.prepare(`
+      SELECT i.id, i.content, e.content_hash
+      FROM items i
+      LEFT JOIN item_embeddings e
+        ON e.item_id = i.id AND e.model = ?
+      WHERE i.project_id = ?
+      ORDER BY i.created_at ASC
+    `).all(embeddingProvider.model, projectId);
     let indexed = 0;
-    for (const item of items) {
+    for (const item of rows) {
       const contentHash = hashText(item.content);
-      if (this.getEmbedding(item.id, contentHash, embeddingProvider.model)) continue;
+      if (item.content_hash === contentHash) continue;
       const vector = await embeddingProvider.embed(item.content);
       this.saveEmbedding({ itemId: item.id, model: embeddingProvider.model, vector, contentHash });
       indexed++;
     }
-    return { indexed, total: items.length };
+    return { indexed, total: rows.length };
   }
 
   async contextAsync({ projectId, task, budget = 8000, limit = 50, semanticThreshold = 0.2, embeddingProvider = getEmbeddingProvider(), weights } = {}) {
