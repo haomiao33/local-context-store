@@ -132,7 +132,8 @@ export class ContextStore {
       WHERE i.project_id = ? AND e.model = ?
     `).all(projectId, embeddingProvider.model);
     const semantic = topKSimilar(queryVector, rows, Math.max(limit, 50))
-      .filter(item => item.semanticScore >= semanticThreshold);
+      .filter(item => item.semanticScore >= semanticThreshold)
+      .map(({ vector_blob, vector, ...item }) => item);
 
     const lexical = [...lexicalById.values()].map(item => ({
       ...item,
