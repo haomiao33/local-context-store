@@ -99,7 +99,9 @@ test('contextAsync keeps semantic candidates beyond the output limit', async () 
       weights: { lexical: 0, semantic: 0, importance: 1, recency: 0 },
     });
 
-    assert.deepEqual(result.items.map(item => item.id), [target.id]);
+    const ids = result.items.map(item => item.id);
+    assert.equal(ids[0], target.id);
+    assert.ok(ids.length > 1, 'semantic candidates must not be capped by the lexical output limit');
   } finally {
     store.close();
   }
