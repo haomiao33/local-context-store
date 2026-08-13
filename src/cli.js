@@ -10,9 +10,9 @@ const projectId = path.resolve(cwd);
 const program = new Command();
 
 program
-  .name('ctx')
+  .name('lcs')
   .description('Local Context Store for coding agents')
-  .version('0.2.0-alpha.1')
+  .version('0.2.0-alpha.2')
   .showHelpAfterError();
 
 program.command('init').description('Initialize a project-local context database at .context/context.db').action(() => {
@@ -22,7 +22,7 @@ program.command('init').description('Initialize a project-local context database
 
 program.command('remember <content>')
   .description('Save durable project context that agents should remember')
-  .addHelpText('after', '\nExamples:\n  $ ctx remember "Auth uses Zustand" --type decision --importance 0.9\n  $ ctx remember "Do not change public auth API" --type constraint --importance 1\n')
+  .addHelpText('after', '\nExamples:\n  $ lcs remember "Auth uses Zustand" --type decision --importance 0.9\n  $ lcs remember "Do not change public auth API" --type constraint --importance 1\n')
   .option('-t, --type <type>', 'context type: fact|decision|task|constraint|observation|note', 'note')
   .option('-i, --importance <number>', 'importance from 0 (low) to 1 (critical)', '0.5')
   .action((content, opts) => {
@@ -37,7 +37,7 @@ program.command('remember <content>')
 
 program.command('search <query>')
   .description('Find stored context by full-text search')
-  .addHelpText('after', '\nExamples:\n  $ ctx search "authentication refresh"\n  $ ctx search "public API" --limit 10\n')
+  .addHelpText('after', '\nExamples:\n  $ lcs search "authentication refresh"\n  $ lcs search "public API" --limit 10\n')
   .option('-l, --limit <number>', 'maximum number of results', '20')
   .action((query, opts) => {
     const limit = Number(opts.limit);
@@ -50,7 +50,7 @@ program.command('search <query>')
 
 program.command('context <task>')
   .description('Build a relevant, token-budgeted context pack for a coding task')
-  .addHelpText('after', '\nExamples:\n  $ ctx context "fix authentication refresh race"\n  $ ctx context "fix authentication refresh race" --semantic\n  $ ctx context "refactor payment service" --budget 4000\n\nThe budget is an approximate token limit for the returned context pack.\n--semantic enables local embedding + FTS5 hybrid retrieval. The q4 model must be installed locally.\n')
+  .addHelpText('after', '\nExamples:\n  $ lcs context "fix authentication refresh race"\n  $ lcs context "fix authentication refresh race" --semantic\n  $ lcs context "refactor payment service" --budget 4000\n\nThe budget is an approximate token limit for the returned context pack.\n--semantic enables local embedding + FTS5 hybrid retrieval. The q4 model must be installed locally.\n')
   .option('-b, --budget <number>', 'approximate token budget for the context pack', '8000')
   .option('--semantic', 'use local embedding + FTS5 hybrid retrieval')
   .action(async (task, opts) => {
@@ -74,7 +74,7 @@ model.command('status').description('Show local q4 embedding model status and pa
 });
 model.command('install')
   .description('Install the local q4 embedding model')
-  .addHelpText('after', '\nExamples:\n  $ ctx model install\n  $ ctx model install --source C:\\models\\all-MiniLM-L6-v2-ONNX\n\n--source copies a manually downloaded model directory and does not use the network.\nThe source directory must contain the files shown by `ctx model status`.\n')
+  .addHelpText('after', '\nExamples:\n  $ lcs model install\n  $ lcs model install --source C:\\models\\all-MiniLM-L6-v2-ONNX\n\n--source copies a manually downloaded model directory and does not use the network.\nThe source directory must contain the files shown by `lcs model status`.\n')
   .option('--source <directory>', 'copy an already-downloaded model directory instead of downloading')
   .action(async opts => {
     const status = await installModel({ sourceDir: opts.source });
@@ -88,7 +88,7 @@ model.command('remove').description('Remove the local embedding model').action(a
 
 program.command('snapshot <title>')
   .description('Save a lightweight checkpoint for resuming or handing work to another agent')
-  .addHelpText('after', '\nExamples:\n  $ ctx snapshot "Auth refresh handoff" --task "fix auth refresh"\n  $ ctx snapshot "Payment refactor" --goal "preserve public API"\n')
+  .addHelpText('after', '\nExamples:\n  $ lcs snapshot "Auth refresh handoff" --task "fix auth refresh"\n  $ lcs snapshot "Payment refactor" --goal "preserve public API"\n')
   .option('-g, --goal <goal>', 'the goal or outcome of the work')
   .option('-t, --task <task>', 'current task; related context is included in the snapshot')
   .action((title, opts) => {
@@ -110,7 +110,7 @@ program.command('show-snapshot').description('Show the latest project resume che
 
 program.command('mcp')
   .description('Start the local MCP server over stdio for Claude Code, Codex, or another MCP client')
-  .addHelpText('after', '\nThe server uses the current working directory as the project and .context/context.db as its database.\n\nExample:\n  $ ctx mcp\n')
+  .addHelpText('after', '\nThe server uses the current working directory as the project and .context/context.db as its database.\n\nExample:\n  $ lcs mcp\n')
   .action(async () => { await import('./mcp.js'); });
 
 program.parseAsync().catch(err => { console.error(`Error: ${err.message}`); process.exit(1); });
