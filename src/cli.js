@@ -50,7 +50,7 @@ program.command('search <query>')
 
 program.command('context <task>')
   .description('Build a relevant, token-budgeted context pack for a coding task')
-  .addHelpText('after', '\nExamples:\n  $ ctx context "fix authentication refresh race"\n  $ ctx context "fix authentication refresh race" --semantic\n  $ ctx context "refactor payment service" --budget 4000\n\nThe budget is an approximate token limit for the returned context pack.\n--semantic enables local embedding + FTS5 hybrid retrieval. The model must be installed locally.\n')
+  .addHelpText('after', '\nExamples:\n  $ ctx context "fix authentication refresh race"\n  $ ctx context "fix authentication refresh race" --semantic\n  $ ctx context "refactor payment service" --budget 4000\n\nThe budget is an approximate token limit for the returned context pack.\n--semantic enables local embedding + FTS5 hybrid retrieval. The q4 model must be installed locally.\n')
   .option('-b, --budget <number>', 'approximate token budget for the context pack', '8000')
   .option('--semantic', 'use local embedding + FTS5 hybrid retrieval')
   .action(async (task, opts) => {
@@ -67,17 +67,18 @@ program.command('context <task>')
   });
 
 const model = program.command('model').description('Manage the local embedding model');
-model.command('status').description('Show local embedding model status and path').action(() => {
+model.command('status').description('Show local q4 embedding model status and path').action(() => {
   const status = modelStatus();
-  console.log(`Model: ${status.model}\nPath: ${status.dir}\nStatus: ${status.installed ? 'installed' : 'not installed'}`);
+  console.log(`Model: ${status.model}\nDtype: ${status.dtype}\nPath: ${status.dir}\nStatus: ${status.installed ? 'installed' : 'not installed'}`);
   for (const file of status.files) console.log(`  ${file.exists ? '✓' : '✗'} ${file.file}`);
 });
 model.command('install')
-  .description('Install the local embedding model')
+  .description('Install the local q4 embedding model')
+  .addHelpText('after', '\nExamples:\n  $ ctx model install\n  $ ctx model install --source C:\\models\\all-MiniLM-L6-v2-ONNX\n\n--source copies a manually downloaded model directory and does not use the network.\nThe source directory must contain the files shown by `ctx model status`.\n')
   .option('--source <directory>', 'copy an already-downloaded model directory instead of downloading')
   .action(async opts => {
     const status = await installModel({ sourceDir: opts.source });
-    console.log(`Installed ${status.model}`);
+    console.log(`Installed ${status.model} (${status.dtype})`);
     console.log(`Path: ${status.dir}`);
   });
 model.command('remove').description('Remove the local embedding model').action(async () => {
