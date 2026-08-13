@@ -133,14 +133,14 @@ export class ContextStore {
 
     const queryVector = await embeddingProvider.embed(task);
     const rows = this.db.prepare(`
-      SELECT i.*
+      SELECT i.*, e.vector AS embedding_vector
       FROM item_embeddings e
       JOIN items i ON i.id = e.item_id
       WHERE i.project_id = ? AND e.model = ?
     `).all(projectId, embeddingProvider.model);
     const semantic = rows.map(row => ({
       ...row,
-      semanticScore: embeddingProvider.similarity(queryVector, decodeVector(row.vector)),
+      semanticScore: embeddingProvider.similarity(queryVector, decodeVector(row.embedding_vector)),
       importance: row.importance,
       recency: recencyScore(row.updated_at),
     })).filter(item => item.semanticScore >= semanticThreshold);
