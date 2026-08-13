@@ -9,6 +9,12 @@ const cli = path.resolve(process.cwd(), 'src/cli.js');
 function tempProject() { return fs.mkdtempSync(path.join(os.tmpdir(), 'lcs-cli-')); }
 function run(project, args, env = {}) { return spawnSync(process.execPath, [cli, ...args], { cwd: project, encoding: 'utf8', env: { ...process.env, ...env } }); }
 
+test('cli exposes lcs as its command name', () => {
+  const result = run(tempProject(), ['--help']);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /Usage: lcs /);
+});
+
 test('cli init creates the project-local database', () => {
   const project = tempProject(); const result = run(project, ['init']);
   assert.equal(result.status, 0); assert.ok(fs.existsSync(path.join(project, '.context', 'context.db'))); assert.match(result.stdout, /Initialized/);
