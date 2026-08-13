@@ -3,19 +3,22 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-export const DEFAULT_MODEL = 'Xenova/all-MiniLM-L6-v2';
-export const DEFAULT_DTYPE = 'q8';
+export const DEFAULT_MODEL = 'onnx-community/all-MiniLM-L6-v2-ONNX';
+export const DEFAULT_DTYPE = 'q4';
 
+// Keep this manifest aligned with the q4 variant published by the ONNX Community
+// model used by Transformers.js. The .onnx_data sidecar is required by ONNX.
 const MODEL_FILES = [
   'config.json',
   'special_tokens_map.json',
   'tokenizer.json',
   'tokenizer_config.json',
   'vocab.txt',
-  'onnx/model_quantized.onnx',
+  'onnx/model_q4.onnx',
+  'onnx/model_q4.onnx_data',
 ];
 
-const HF_BASE = 'https://huggingface.co/Xenova/all-MiniLM-L6-v2/resolve/main';
+const HF_BASE = 'https://huggingface.co/onnx-community/all-MiniLM-L6-v2-ONNX/resolve/main';
 
 export function getModelBaseDir() {
   if (process.env.LCS_MODEL_DIR) return path.resolve(process.env.LCS_MODEL_DIR);
@@ -40,7 +43,13 @@ export function isModelInstalled(options = {}) {
 export function modelStatus(options = {}) {
   const dir = getModelDir(options);
   const files = MODEL_FILES.map(file => ({ file, exists: fs.existsSync(path.join(dir, file)) }));
-  return { model: options.model ?? DEFAULT_MODEL, dir, installed: files.every(file => file.exists), files };
+  return {
+    model: options.model ?? DEFAULT_MODEL,
+    dtype: DEFAULT_DTYPE,
+    dir,
+    installed: files.every(file => file.exists),
+    files,
+  };
 }
 
 async function downloadFile(url, destination, fetchImpl) {
