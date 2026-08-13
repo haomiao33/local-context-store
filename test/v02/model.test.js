@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { DEFAULT_MODEL, getModelDir, getModelFiles, isModelInstalled, installModel, modelStatus, removeModel } from '../../src/model.js';
+import { DEFAULT_DTYPE, DEFAULT_MODEL, getModelDir, getModelFiles, isModelInstalled, installModel, modelStatus, removeModel } from '../../src/model.js';
 
 function tempDir() { return fs.mkdtempSync(path.join(os.tmpdir(), 'lcs-model-')); }
 
@@ -16,29 +16,40 @@ async function writeFixture(dir) {
   }
 }
 
-test('default local model uses Xenova all-MiniLM-L6-v2', () => {
-  assert.equal(DEFAULT_MODEL, 'Xenova/all-MiniLM-L6-v2');
+test('default local model uses the ONNX Community q4 MiniLM manifest', () => {
+  assert.equal(DEFAULT_MODEL, 'onnx-community/all-MiniLM-L6-v2-ONNX');
+  assert.equal(DEFAULT_DTYPE, 'q4');
+  assert.deepEqual(getModelFiles(), [
+    'config.json',
+    'special_tokens_map.json',
+    'tokenizer.json',
+    'tokenizer_config.json',
+    'vocab.txt',
+    'onnx/model_q4.onnx',
+    'onnx/model_q4.onnx_data',
+  ]);
 });
 
-test('model status reports missing local model', () => {
+test('model status reports missing local q4 model', () => {
   const baseDir = tempDir();
   const status = modelStatus({ baseDir });
   assert.equal(status.installed, false);
+  assert.equal(status.dtype, 'q4');
   assert.equal(isModelInstalled({ baseDir }), false);
-  assert.equal(status.files.length, 6);
+  assert.equal(status.files.length, 7);
 });
 
-test('model install copies a local model fixture without network access', async () => {
+test('model install copies a manually downloaded q4 model without network access', async () => {
   const baseDir = tempDir();
   const sourceDir = tempDir();
   await writeFixture(sourceDir);
   const status = await installModel({ baseDir, sourceDir });
   assert.equal(status.installed, true);
-  assert.ok(fs.existsSync(path.join(getModelDir({ baseDir }), 'onnx', 'model_quantized.onnx')));
-  assert.equal(fs.readFileSync(path.join(getModelDir({ baseDir }), 'config.json'), 'utf8'), 'fixture:config.json');
+  assert.ok(fs.existsSync(path.join(getModelDir({ baseDir }), 'onnx', 'model_q4.onnx')));
+  assert.ok(fs.existsSync(path.join(getModelDir({ baseDir }), 'onnx', 'model_q4.onnx_data')));
 });
 
-test('model install downloads the exact runtime manifest', async () => {
+test('model install downloads the exact q4 runtime manifest', async () => {
   const baseDir = tempDir();
   const requests = [];
   const fetchImpl = async url => {
@@ -47,9 +58,10 @@ test('model install downloads the exact runtime manifest', async () => {
   };
   const status = await installModel({ baseDir, fetchImpl });
   assert.equal(status.installed, true);
-  assert.equal(requests.length, 6);
-  assert.ok(requests.every(url => url.includes('/Xenova/all-MiniLM-L6-v2/resolve/main/')));
-  assert.ok(requests.some(url => url.endsWith('/onnx/model_quantized.onnx')));
+  assert.equal(requests.length, 7);
+  assert.ok(requests.every(url => url.includes('/onnx-community/all-MiniLM-L6-v2-ONNX/resolve/main/')));
+  assert.ok(requests.some(url => url.endsWith('/onnx/model_q4.onnx')));
+  assert.ok(requests.some(url => url.endsWith('/onnx/model_q4.onnx_data')));
 });
 
 test('model remove deletes only the local model directory', async () => {
