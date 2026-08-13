@@ -24,6 +24,17 @@ function createTestEmbeddingProvider() {
       if (vectors.has(text)) return vectors.get(text);
       return [0, 0, 0, 1];
     },
+    similarity(a, b) {
+      let dot = 0;
+      let normA = 0;
+      let normB = 0;
+      for (let i = 0; i < a.length; i++) {
+        dot += a[i] * b[i];
+        normA += a[i] * a[i];
+        normB += b[i] * b[i];
+      }
+      return dot / Math.sqrt(normA * normB);
+    },
   };
 }
 
@@ -49,6 +60,46 @@ test('contextAsync combines lexical and semantic retrieval', async () => {
     assert.ok(ids.includes(lexical.id));
     assert.ok(!ids.includes(unrelated.id));
     assert.ok(result.items.every(item => Number.isFinite(item.score)));
+  } finally {
+    store.close();
+  }
+});
+
+test('contextAsync keeps semantic candidates beyond the output limit', async () => {
+  const projectDir = createProject();
+  const projectId = path.resolve(projectDir);
+  const store = createStore(projectDir);
+  const embeddingProvider = {
+    model: 'recall-fixture-v1',
+    dimensions: 2,
+    async embed(text) {
+      if (text === 'target concept') return [1, 0];
+      return [0.99, 0.14];
+    },
+    similarity(a, b) {
+      const dot = a[0] * b[0] + a[1] * b[1];
+      const normA = Math.hypot(a[0], a[1]);
+      const normB = Math.hypot(b[0], b[1]);
+      return dot / (normA * normB);
+    },
+  };
+  try {
+    for (let i = 0; i < 60; i++) {
+      store.remember({ projectId, content: `semantic distractor ${i}`, importance: 0 });
+    }
+    const target = store.remember({ projectId, content: 'target concept', importance: 1 });
+
+    const result = await store.contextAsync({
+      projectId,
+      task: 'target concept',
+      limit: 1,
+      budget: 2000,
+      semanticThreshold: 0.2,
+      embeddingProvider,
+      weights: { lexical: 0, semantic: 0, importance: 1, recency: 0 },
+    });
+
+    assert.deepEqual(result.items.map(item => item.id), [target.id]);
   } finally {
     store.close();
   }
