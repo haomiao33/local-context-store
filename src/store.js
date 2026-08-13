@@ -133,16 +133,16 @@ export class ContextStore {
 
     const queryVector = await embeddingProvider.embed(task);
     const rows = this.db.prepare(`
-      SELECT i.*, e.vector AS embedding_vector
+      SELECT i.id, i.importance, i.updated_at, e.vector AS embedding_vector
       FROM item_embeddings e
       JOIN items i ON i.id = e.item_id
       WHERE i.project_id = ? AND e.model = ?
     `).all(projectId, embeddingProvider.model);
     const semantic = rows.map(row => ({
-      ...row,
-      semanticScore: embeddingProvider.similarity(queryVector, decodeVector(row.embedding_vector)),
+      id: row.id,
       importance: row.importance,
       recency: recencyScore(row.updated_at),
+      semanticScore: embeddingProvider.similarity(queryVector, decodeVector(row.embedding_vector)),
     })).filter(item => item.semanticScore >= semanticThreshold);
 
     const lexical = [...lexicalById.values()].map(item => ({
@@ -152,10 +152,18 @@ export class ContextStore {
       recency: recencyScore(item.updated_at),
     }));
 
-    const ranked = hybridRank({ lexical, semantic, weights }).map(item => ({
-      ...item,
-      score: item.score,
-    }));
+    const ranked = hybridRank({ lexical, semantic, weights });
+    const rankedIds = ranked.map(item => item.id);
+    const missingContentIds = ranked.filter(item => !item.content).map(item => item.id);
+    if (missingContentIds.length) {
+      const placeholders = missingContentIds.map(() => '?').join(',');
+      const hydrated = this.db.prepare(`SELECT * FROM items WHERE project_id = ? AND id IN (${placeholders})`).all(projectId, ...missingContentIds);
+      const byId = new Map(hydrated.map(item => [item.id, item]));
+      for (const item of ranked) {
+        const full = byId.get(item.id);
+        if (full) Object.assign(item, full);
+      }
+    }
     const selected = selectBudget(ranked, budget);
     return { projectId, task, tokenCount: selected.tokenCount, items: selected.items };
   }
