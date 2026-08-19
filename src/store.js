@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
-import { openDatabase } from './db.js';
+import { openDatabase, rebuildFts } from './db.js';
 import { decodeVector, encodeVector } from './vector.js';
 import { getEmbeddingProvider, hashText, DEFAULT_EMBEDDING_MODEL } from './embedding.js';
 import { hybridRank } from './hybrid.js';
@@ -59,16 +59,53 @@ export class ContextStore {
     if (!projectId) throw new Error('projectId is required');
     if (!content?.trim()) throw new Error('content is required');
     if (!ITEM_TYPES.includes(type)) throw new Error(`invalid type: ${type}`);
-    const itemId = id();
     const timestamp = now();
     const score = Number(importance);
     if (!Number.isFinite(score) || score < 0 || score > 1) throw new Error('importance must be a number between 0 and 1');
+    const text = content.trim();
+
+    // Agents restate the same fact across sessions. Duplicates would not just
+    // waste rows: identical entries compete for the same Context Pack budget
+    // and crowd out other context. Re-remembering therefore updates in place.
+    const existing = this.db.prepare('SELECT id FROM items WHERE project_id = ? AND content = ?').get(projectId, text);
+    if (existing) {
+      const update = this.db.transaction(() => {
+        this.db.prepare('UPDATE items SET type = ?, importance = ?, updated_at = ? WHERE id = ?').run(type, score, timestamp, existing.id);
+        // Content is unchanged, so the FTS row still matches; only type is
+        // mirrored there.
+        this.db.prepare('UPDATE items_fts SET type = ? WHERE id = ?').run(type, existing.id);
+      });
+      withSqliteRetry(update);
+      return this.get(existing.id);
+    }
+
+    const itemId = id();
     const insert = this.db.transaction(() => {
-      this.db.prepare(`INSERT INTO items(id, project_id, session_id, type, content, importance, created_at, updated_at, source_agent, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(itemId, projectId, sessionId, type, content.trim(), score, timestamp, timestamp, agent, JSON.stringify(metadata));
-      this.db.prepare(`INSERT INTO items_fts(id, project_id, content, type) VALUES (?, ?, ?, ?)`).run(itemId, projectId, content.trim(), type);
+      this.db.prepare(`INSERT INTO items(id, project_id, session_id, type, content, importance, created_at, updated_at, source_agent, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(itemId, projectId, sessionId, type, text, score, timestamp, timestamp, agent, JSON.stringify(metadata));
+      this.db.prepare(`INSERT INTO items_fts(id, project_id, content, type) VALUES (?, ?, ?, ?)`).run(itemId, projectId, text, type);
     });
     withSqliteRetry(insert);
     return this.get(itemId);
+  }
+
+  // items_fts owns its content and has no foreign key to items, so its row has
+  // to be removed explicitly; item_embeddings cascades on the items delete.
+  forget(itemId) {
+    if (!itemId) throw new Error('itemId is required');
+    return withSqliteRetry(() => {
+      const remove = this.db.transaction(() => {
+        const { changes } = this.db.prepare('DELETE FROM items WHERE id = ?').run(itemId);
+        this.db.prepare('DELETE FROM items_fts WHERE id = ?').run(itemId);
+        return changes > 0;
+      });
+      return remove();
+    });
+  }
+
+  // Repairs the drift that `lcs status` reports: rebuilds items_fts from items.
+  reindex() {
+    rebuildFts(this.db);
+    return { indexed: this.db.prepare('SELECT COUNT(*) AS count FROM items_fts').get().count };
   }
 
   get(itemId) {

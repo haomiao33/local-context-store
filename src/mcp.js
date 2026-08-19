@@ -3,7 +3,9 @@ import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { createStore } from './store.js';
+import { createStore, projectDatabase } from './store.js';
+import { modelStatus } from './model.js';
+import { DEFAULT_EMBEDDING_DIMENSIONS } from './embedding.js';
 
 const projectDir = process.env.LOCAL_CONTEXT_PROJECT || process.cwd();
 const projectId = path.resolve(projectDir);
@@ -59,6 +61,41 @@ server.registerTool('context_snapshot', {
     }
   });
   return { content: [{ type: 'text', text: JSON.stringify(snapshot, null, 2) }] };
+});
+
+// Lexical search complements context_get: an agent looking for an exact symbol,
+// error code, or API name wants the keyword hit, not a ranked context pack.
+server.registerTool('context_search', {
+  description: 'Find stored context by exact keyword, for symbols, API names, and error codes.',
+  inputSchema: {
+    query: z.string().min(1),
+    limit: z.number().int().positive().max(100).default(20)
+  }
+}, async ({ query, limit }) => {
+  const rows = store.search({ projectId, query, limit });
+  return { content: [{ type: 'text', text: JSON.stringify(rows, null, 2) }] };
+});
+
+// Lets an agent judge how much to trust what it retrieves: a drifted search
+// index means results are incomplete, not merely empty.
+server.registerTool('context_status', {
+  description: 'Report what this project remembers and whether retrieval is healthy.',
+  inputSchema: {}
+}, async () => {
+  const model = modelStatus();
+  const payload = {
+    version: pkg.version,
+    model: {
+      available: model.available,
+      resolvedFrom: model.resolvedFrom,
+      name: model.model,
+      dtype: model.dtype,
+      dimensions: DEFAULT_EMBEDDING_DIMENSIONS
+    },
+    database: { path: projectDatabase(projectDir) },
+    project: store.stats({ projectId })
+  };
+  return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
 });
 
 const transport = new StdioServerTransport();
