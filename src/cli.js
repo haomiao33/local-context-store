@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Command } from 'commander';
 import { createStore, projectDatabase, ITEM_TYPES } from './store.js';
+import { DEFAULT_EMBEDDING_DIMENSIONS } from './embedding.js';
 import { getEmbeddingProvider } from './embedding.js';
 import { getModelBaseDir, modelStatus, installModel, removeModel, ensureModelReady } from './model.js';
 
@@ -13,6 +14,36 @@ const projectId = path.resolve(cwd);
 // npm always ships package.json, so this resolves for both `npm link` and
 // global installs.
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+
+const SOURCE_LABELS = { packaged: 'shipped with the package', user: 'installed locally' };
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
+function formatAge(timestamp) {
+  if (!timestamp) return 'never';
+  const seconds = Math.max(0, (Date.now() - Date.parse(timestamp)) / 1000);
+  if (seconds < 90) return 'just now';
+  const minutes = seconds / 60;
+  if (minutes < 90) return `${Math.round(minutes)}m ago`;
+  const hours = minutes / 60;
+  if (hours < 36) return `${Math.round(hours)}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
+// The database keeps its write-ahead log alongside the main file; reporting the
+// main file alone understates the footprint after heavy writes.
+function databaseBytes(databasePath) {
+  return ['', '-wal', '-shm'].reduce((total, suffix) => {
+    try { return total + fs.statSync(`${databasePath}${suffix}`).size; } catch { return total; }
+  }, 0);
+}
 
 const program = new Command();
 
@@ -79,8 +110,60 @@ program.command('context <task>')
     console.log(`Items: ${result.items.length}  Approx. tokens: ${result.tokenCount}`);
   });
 
+program.command('status')
+  .description('Show what this project remembers and whether an agent can retrieve it')
+  .addHelpText('after', '\nExamples:\n  $ lcs status\n  $ lcs status --project ~/work/api\n  $ lcs status --json\n\nA project id is the absolute path of the project directory, so --project takes\nthat directory and reads its .context/context.db.\n')
+  .option('-p, --project <directory>', 'report on another project directory instead of the current one')
+  .option('--json', 'emit machine-readable output for agents and scripts')
+  .action(opts => {
+    const projectDir = opts.project ? path.resolve(opts.project) : cwd;
+    const project = path.resolve(projectDir);
+    const databasePath = projectDatabase(projectDir);
+    const model = modelStatus();
+    const store = createStore(projectDir);
+    let stats;
+    try { stats = store.stats({ projectId: project }); } finally { store.close(); }
+    const bytes = databaseBytes(databasePath);
+
+    if (opts.json) {
+      console.log(JSON.stringify({
+        version: pkg.version,
+        model: {
+          available: model.available,
+          resolvedFrom: model.resolvedFrom,
+          name: model.model,
+          dtype: model.dtype,
+          dimensions: DEFAULT_EMBEDDING_DIMENSIONS,
+          path: model.dir,
+        },
+        database: { path: databasePath, bytes },
+        project: stats,
+      }, null, 2));
+      return;
+    }
+
+    const typeBreakdown = Object.entries(stats.items.byType).map(([type, count]) => `${type} ${count}`).join(' · ');
+    const modelState = model.available ? `available (${SOURCE_LABELS[model.resolvedFrom]})` : 'not available';
+
+    console.log('Runtime');
+    console.log(`  lcs            ${pkg.version}`);
+    console.log(`  Model          ${modelState} · ${model.dtype} · ${DEFAULT_EMBEDDING_DIMENSIONS}d`);
+    console.log(`  Path           ${model.dir}`);
+    console.log(`\nProject  ${project}`);
+    console.log(`  Database       ${databasePath}  (${formatBytes(bytes)})`);
+    console.log(`  Items          ${stats.items.total}${typeBreakdown ? `   ${typeBreakdown}` : ''}`);
+    console.log(`  High-signal    ${stats.items.highSignal} at importance >= 0.8`);
+    console.log(`  Updated        newest ${formatAge(stats.items.newestUpdatedAt)} · oldest ${formatAge(stats.items.oldestUpdatedAt)}`);
+    console.log(`  Sessions       ${stats.sessions.total}`);
+    console.log(`  Snapshots      ${stats.snapshots.total}${stats.snapshots.latest ? `   latest "${stats.snapshots.latest.title}" (${formatAge(stats.snapshots.latest.createdAt)})` : ''}`);
+    console.log('\nRetrieval');
+    console.log(`  FTS index      ${stats.fts.indexed} / ${stats.fts.total} indexed${stats.fts.drift ? '   ← drift: search will miss unindexed items' : ''}`);
+    const stale = stats.embeddings.total - stats.embeddings.current;
+    console.log(`  Embeddings     ${stats.embeddings.current} / ${stats.embeddings.total} current${stale ? `  (${stale} missing or stale, recomputed on the next --semantic run)` : ''}`);
+    console.log(`                 ${stats.embeddings.model}`);
+  });
+
 const model = program.command('model').description('Manage the local embedding model');
-const SOURCE_LABELS = { packaged: 'shipped with the package', user: 'installed locally' };
 model.command('status').description('Show local q4 embedding model status and path').action(() => {
   const status = modelStatus();
   const where = status.available ? `available (${SOURCE_LABELS[status.resolvedFrom]})` : 'not available';

@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -8,7 +9,11 @@ const projectDir = process.env.LOCAL_CONTEXT_PROJECT || process.cwd();
 const projectId = path.resolve(projectDir);
 const store = createStore(projectDir);
 
-const server = new McpServer({ name: 'local-context-store', version: '0.1.0' });
+// Same source of truth as the CLI: a hardcoded string here drifted to 0.1.0
+// while the package was at 0.3.x.
+const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+
+const server = new McpServer({ name: 'local-context-store', version: pkg.version });
 
 server.registerTool('context_get', {
   description: 'Retrieve durable project context relevant to the current coding task.',

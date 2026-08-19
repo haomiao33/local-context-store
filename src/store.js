@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { openDatabase } from './db.js';
 import { decodeVector, encodeVector } from './vector.js';
-import { getEmbeddingProvider, hashText } from './embedding.js';
+import { getEmbeddingProvider, hashText, DEFAULT_EMBEDDING_MODEL } from './embedding.js';
 import { hybridRank } from './hybrid.js';
 import { withSqliteRetry } from './sqlite-retry.js';
 
@@ -203,8 +203,65 @@ export class ContextStore {
     return this.db.prepare('SELECT * FROM snapshots WHERE id = ?').get(snapshotId);
   }
 
+  // Read-only summary of what an agent can actually retrieve from this project.
+  // The two retrieval numbers are the point: a drifted FTS index makes search
+  // silently miss items, and a stale embedding makes `--semantic` recompute.
+  stats({ projectId, model = DEFAULT_EMBEDDING_MODEL } = {}) {
+    if (!projectId) throw new Error('projectId is required');
+
+    const totals = this.db.prepare(`
+      SELECT
+        COUNT(*) AS total,
+        COALESCE(SUM(importance >= 0.8), 0) AS high_signal,
+        MAX(updated_at) AS newest,
+        MIN(updated_at) AS oldest
+      FROM items WHERE project_id = ?
+    `).get(projectId);
+
+    const byType = {};
+    for (const row of this.db.prepare('SELECT type, COUNT(*) AS count FROM items WHERE project_id = ? GROUP BY type ORDER BY count DESC, type ASC').all(projectId)) {
+      byType[row.type] = row.count;
+    }
+
+    const indexed = this.db.prepare('SELECT COUNT(*) AS count FROM items_fts WHERE project_id = ?').get(projectId).count;
+
+    // content_hash is compared in JS because the hash is not stored on items.
+    const embeddable = this.db.prepare(`
+      SELECT i.content AS content, e.content_hash AS content_hash
+      FROM items i
+      LEFT JOIN item_embeddings e ON e.item_id = i.id AND e.model = ?
+      WHERE i.project_id = ?
+    `).all(model, projectId);
+    const current = embeddable.filter(row => row.content_hash && row.content_hash === hashText(row.content)).length;
+
+    const latest = this.db.prepare('SELECT title, goal, created_at FROM snapshots WHERE project_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(projectId);
+
+    return {
+      projectId,
+      items: {
+        total: totals.total,
+        byType,
+        highSignal: totals.high_signal,
+        newestUpdatedAt: totals.newest ?? null,
+        oldestUpdatedAt: totals.oldest ?? null,
+      },
+      sessions: {
+        total: this.db.prepare('SELECT COUNT(*) AS count FROM sessions WHERE project_id = ?').get(projectId).count,
+      },
+      snapshots: {
+        total: this.db.prepare('SELECT COUNT(*) AS count FROM snapshots WHERE project_id = ?').get(projectId).count,
+        latest: latest ? { title: latest.title, goal: latest.goal ?? null, createdAt: latest.created_at } : null,
+      },
+      fts: { total: totals.total, indexed, drift: indexed !== totals.total },
+      embeddings: { total: totals.total, current, model },
+    };
+  }
+
   latestSnapshot(projectId) {
-    const row = this.db.prepare('SELECT * FROM snapshots WHERE project_id = ? ORDER BY created_at DESC LIMIT 1').get(projectId);
+    // created_at is millisecond-resolution, so rowid breaks ties by insertion
+    // order; without it two snapshots taken in the same millisecond can resolve
+    // to the older one.
+    const row = this.db.prepare('SELECT * FROM snapshots WHERE project_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(projectId);
     if (!row) return null;
     return { ...row, state: JSON.parse(row.state_json) };
   }

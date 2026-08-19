@@ -219,6 +219,52 @@ Initialize the current project:
 lcs init
 ```
 
+### `lcs status`
+
+Show what this project remembers and whether an agent can actually retrieve it:
+
+```bash
+lcs status
+```
+
+```text
+Runtime
+  lcs            0.4.0
+  Model          available (shipped with the package) · q4 · 384d
+  Path           .../local-context-store/model/onnx-community/all-MiniLM-L6-v2-ONNX
+
+Project  /work/api
+  Database       /work/api/.context/context.db  (84 KB)
+  Items          3   constraint 1 · decision 1 · observation 1
+  High-signal    2 at importance >= 0.8
+  Updated        newest just now · oldest 4d ago
+  Sessions       0
+  Snapshots      1   latest "Auth refresh handoff" (2h ago)
+
+Retrieval
+  FTS index      3 / 3 indexed
+  Embeddings     3 / 3 current
+                 onnx-community/all-MiniLM-L6-v2-ONNX
+```
+
+The **Retrieval** block is the part worth watching:
+
+- **FTS index** — when fewer items are indexed than exist, `search` and `context` silently miss the difference.
+- **Embeddings** — how many items have a vector for the current model whose content hash still matches. Missing or stale ones are recomputed on the next `--semantic` run.
+
+A project id is the absolute path of the project directory, so `--project` takes
+that directory and reads its database:
+
+```bash
+lcs status --project ~/work/api
+```
+
+`--json` emits the same data for agents and scripts:
+
+```bash
+lcs status --json
+```
+
 ### `lcs remember <content>`
 
 Store durable project context:
