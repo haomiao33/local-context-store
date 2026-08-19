@@ -4,7 +4,7 @@ import path from 'node:path';
 import { Command } from 'commander';
 import { createStore, projectDatabase, ITEM_TYPES } from './store.js';
 import { getEmbeddingProvider } from './embedding.js';
-import { getModelBaseDir, modelStatus, installModel, removeModel } from './model.js';
+import { getModelBaseDir, modelStatus, installModel, removeModel, ensureModelReady } from './model.js';
 
 const cwd = process.cwd();
 const projectId = path.resolve(cwd);
@@ -57,12 +57,17 @@ program.command('search <query>')
 
 program.command('context <task>')
   .description('Build a relevant, token-budgeted context pack for a coding task')
-  .addHelpText('after', '\nExamples:\n  $ lcs context "fix authentication refresh race"\n  $ lcs context "fix authentication refresh race" --semantic\n  $ lcs context "refactor payment service" --budget 4000\n\nThe budget is an approximate token limit for the returned context pack.\n--semantic enables local embedding + FTS5 hybrid retrieval. The q4 model must be installed locally.\n')
+  .addHelpText('after', '\nExamples:\n  $ lcs context "fix authentication refresh race"\n  $ lcs context "fix authentication refresh race" --semantic\n  $ lcs context "refactor payment service" --budget 4000\n\nThe budget is an approximate token limit for the returned context pack.\n--semantic enables local embedding + FTS5 hybrid retrieval.\nThe q4 model ships with the package and is installed automatically on first use.\n')
   .option('-b, --budget <number>', 'approximate token budget for the context pack', '8000')
   .option('--semantic', 'use local embedding + FTS5 hybrid retrieval')
   .action(async (task, opts) => {
     const budget = Number(opts.budget);
     if (!Number.isInteger(budget) || budget < 1) throw new Error('budget must be a positive integer');
+    if (opts.semantic) {
+      const ready = await ensureModelReady();
+      if (ready.source === 'bundled') console.error(`Installed the packaged ${ready.dtype} model into ${ready.dir}`);
+      else if (ready.source !== 'installed') console.error(`Downloaded the ${ready.dtype} model from ${ready.source} into ${ready.dir}`);
+    }
     const store = createStore(cwd);
     const result = opts.semantic
       ? await store.contextAsync({ projectId, task, budget, embeddingProvider: getEmbeddingProvider() })
@@ -77,15 +82,17 @@ const model = program.command('model').description('Manage the local embedding m
 model.command('status').description('Show local q4 embedding model status and path').action(() => {
   const status = modelStatus();
   console.log(`Model: ${status.model}\nDtype: ${status.dtype}\nPath: ${status.dir}\nStatus: ${status.installed ? 'installed' : 'not installed'}`);
+  console.log(`Bundled: ${status.bundled.available ? `available (${status.bundled.dir})` : 'missing'}`);
   for (const file of status.files) console.log(`  ${file.exists ? '✓' : '✗'} ${file.file}`);
+  if (!status.installed && status.bundled.available) console.log('\nRun `lcs model install` to copy the packaged model, or just use `lcs context <task> --semantic`.');
 });
 model.command('install')
   .description('Install the local q4 embedding model')
-  .addHelpText('after', '\nExamples:\n  $ lcs model install\n  $ lcs model install --source C:\\models\\all-MiniLM-L6-v2-ONNX\n\n--source copies a manually downloaded model directory and does not use the network.\nThe source directory must contain the files shown by `lcs model status`.\n')
+  .addHelpText('after', '\nExamples:\n  $ lcs model install\n  $ lcs model install --source C:\\models\\all-MiniLM-L6-v2-ONNX\n\nWithout --source the model is copied from the copy shipped in the package, and only\ndownloaded (GitHub first, then HuggingFace) when the package has no bundled copy.\n--source copies a manually downloaded model directory and does not use the network.\nThe source directory must contain the files shown by `lcs model status`.\n')
   .option('--source <directory>', 'copy an already-downloaded model directory instead of downloading')
   .action(async opts => {
     const status = await installModel({ sourceDir: opts.source });
-    console.log(`Installed ${status.model} (${status.dtype})`);
+    console.log(`Installed ${status.model} (${status.dtype}) from ${status.source}`);
     console.log(`Path: ${status.dir}`);
   });
 model.command('remove').description('Remove the local embedding model').action(async () => {

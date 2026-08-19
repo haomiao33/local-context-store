@@ -88,9 +88,24 @@ lcs context "fix authentication refresh race"
 For lexical + semantic hybrid retrieval:
 
 ```bash
-lcs model install
 lcs context "fix authentication refresh race" --semantic
 ```
+
+The q4 embedding model ships inside the npm package, so the first `--semantic`
+query installs it from that bundled copy and works offline — no separate
+`lcs model install` step and no download. Run `lcs model status` to see both the
+installed path and whether the packaged copy is present.
+
+`lcs model install` resolves its source in this order:
+
+1. `--source <directory>` — a model directory you downloaded yourself, never uses the network
+2. the copy bundled in the installed package
+3. `raw.githubusercontent.com/haomiao33/local-context-store`
+4. `huggingface.co/onnx-community/all-MiniLM-L6-v2-ONNX`
+
+Only a source-only checkout that skipped `model/` reaches steps 3 and 4. If every
+source fails, the error lists each attempt so you can pick one and pass it via
+`--source`.
 
 The first semantic query can be slower because missing embeddings are generated and persisted. Repeated queries reuse persisted embeddings.
 

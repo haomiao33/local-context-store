@@ -49,6 +49,8 @@ test('model install copies a manually downloaded q4 model without network access
   assert.ok(fs.existsSync(path.join(getModelDir({ baseDir }), 'onnx', 'model_q4.onnx_data')));
 });
 
+// bundledDir: null forces the remote path; the packaged model would otherwise
+// win. Remote source order itself is covered in bundled-model.test.js.
 test('model install downloads the exact q4 runtime manifest', async () => {
   const baseDir = tempDir();
   const requests = [];
@@ -56,11 +58,10 @@ test('model install downloads the exact q4 runtime manifest', async () => {
     requests.push(url);
     return { ok: true, status: 200, arrayBuffer: async () => Buffer.from(`download:${url}`) };
   };
-  const status = await installModel({ baseDir, fetchImpl });
+  const status = await installModel({ baseDir, bundledDir: null, fetchImpl });
   assert.equal(status.installed, true);
   assert.equal(requests.length, 7);
-  assert.ok(requests.every(url => url.includes('/onnx-community/all-MiniLM-L6-v2-ONNX/resolve/main/')));
-  assert.ok(requests.some(url => url.endsWith('/onnx/model_q4.onnx')));
+  for (const file of getModelFiles()) assert.ok(requests.some(url => url.endsWith(`/${file}`)), `no request for ${file}`);
   assert.ok(requests.some(url => url.endsWith('/onnx/model_q4.onnx_data')));
 });
 
