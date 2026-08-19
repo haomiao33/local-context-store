@@ -38,6 +38,31 @@ lcs --help
 lcs init
 ```
 
+### npm 12 and install scripts
+
+npm 12 no longer runs dependency install scripts unless the installing project
+allows them. This package needs three of them to build or fetch native binaries:
+`better-sqlite3` (SQLite), `onnxruntime-node` (ONNX runtime), and `protobufjs`.
+A blocked install looks healthy but fails at runtime with
+`Could not locate the bindings file`.
+
+An `allowScripts` entry only applies to the project running the install, so a
+dependency cannot allow itself. Approve them at install time:
+
+```bash
+npm install -g local-context-store --allow-scripts=better-sqlite3,onnxruntime-node,protobufjs
+```
+
+Or once, for your user:
+
+```bash
+npm config set allow-scripts=better-sqlite3,onnxruntime-node,protobufjs --location=user
+```
+
+Older npm releases run install scripts by default and need none of this.
+
+### `lcs: command not found`
+
 If your shell reports `lcs: command not found`, npm's global bin directory is not
 on your `PATH`. Check where npm puts it and add it:
 
