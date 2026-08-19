@@ -52,10 +52,11 @@ test('cli context help documents the local semantic retrieval option', () => {
   assert.match(result.stdout, /--semantic/); assert.match(result.stdout, /local embedding/); assert.match(result.stdout, /budget/);
 });
 
-test('cli model status reports the configured local model path', () => {
-  const baseDir = tempProject();
-  const result = run(tempProject(), ['model', 'status'], { LCS_MODEL_DIR: baseDir });
-  assert.equal(result.status, 0); assert.match(result.stdout, /Status: not installed/); assert.match(result.stdout, new RegExp(baseDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+test('cli model status reports the packaged model as available with no install step', () => {
+  const result = run(tempProject(), ['model', 'status'], { LCS_MODEL_DIR: tempProject() });
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /Status: available \(shipped with the package\)/);
+  assert.doesNotMatch(result.stdout, /✗/);
 });
 
 test('cli model help documents install, status, and remove', () => {

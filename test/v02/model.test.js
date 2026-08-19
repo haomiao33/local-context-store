@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { DEFAULT_DTYPE, DEFAULT_MODEL, getModelDir, getModelFiles, isModelInstalled, installModel, modelStatus, removeModel } from '../../src/model.js';
+import { DEFAULT_DTYPE, DEFAULT_MODEL, getModelDir, getModelFiles, isModelAvailable, installModel, modelStatus, removeModel } from '../../src/model.js';
 
 function tempDir() { return fs.mkdtempSync(path.join(os.tmpdir(), 'lcs-model-')); }
 
@@ -32,10 +32,10 @@ test('default local model uses the ONNX Community q4 MiniLM manifest', () => {
 
 test('model status reports missing local q4 model', () => {
   const baseDir = tempDir();
-  const status = modelStatus({ baseDir });
-  assert.equal(status.installed, false);
+  const status = modelStatus({ baseDir, bundledBaseDir: tempDir() });
+  assert.equal(status.available, false);
   assert.equal(status.dtype, 'q4');
-  assert.equal(isModelInstalled({ baseDir }), false);
+  assert.equal(isModelAvailable({ baseDir }), false);
   assert.equal(status.files.length, 7);
 });
 
@@ -44,13 +44,12 @@ test('model install copies a manually downloaded q4 model without network access
   const sourceDir = tempDir();
   await writeFixture(sourceDir);
   const status = await installModel({ baseDir, sourceDir });
-  assert.equal(status.installed, true);
+  assert.equal(status.available, true);
   assert.ok(fs.existsSync(path.join(getModelDir({ baseDir }), 'onnx', 'model_q4.onnx')));
   assert.ok(fs.existsSync(path.join(getModelDir({ baseDir }), 'onnx', 'model_q4.onnx_data')));
 });
 
-// bundledDir: null forces the remote path; the packaged model would otherwise
-// win. Remote source order itself is covered in bundled-model.test.js.
+// Remote source order itself is covered in bundled-model.test.js.
 test('model install downloads the exact q4 runtime manifest', async () => {
   const baseDir = tempDir();
   const requests = [];
@@ -58,8 +57,8 @@ test('model install downloads the exact q4 runtime manifest', async () => {
     requests.push(url);
     return { ok: true, status: 200, arrayBuffer: async () => Buffer.from(`download:${url}`) };
   };
-  const status = await installModel({ baseDir, bundledDir: null, fetchImpl });
-  assert.equal(status.installed, true);
+  const status = await installModel({ baseDir, fetchImpl });
+  assert.equal(status.available, true);
   assert.equal(requests.length, 7);
   for (const file of getModelFiles()) assert.ok(requests.some(url => url.endsWith(`/${file}`)), `no request for ${file}`);
   assert.ok(requests.some(url => url.endsWith('/onnx/model_q4.onnx_data')));
@@ -71,6 +70,6 @@ test('model remove deletes only the local model directory', async () => {
   await writeFixture(sourceDir);
   await installModel({ baseDir, sourceDir });
   await removeModel({ baseDir });
-  assert.equal(isModelInstalled({ baseDir }), false);
+  assert.equal(isModelAvailable({ baseDir }), false);
   assert.equal(fs.existsSync(getModelDir({ baseDir })), false);
 });

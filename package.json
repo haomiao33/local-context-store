@@ -1,6 +1,6 @@
 {
   "name": "local-context-store",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A local-first context store for coding agents such as Claude Code and Codex.",
   "type": "module",
   "bin": {

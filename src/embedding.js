@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { cosineSimilarity } from './vector.js';
-import { DEFAULT_MODEL, DEFAULT_DTYPE, getModelBaseDir } from './model.js';
+import { DEFAULT_MODEL, DEFAULT_DTYPE, getModelBaseDir, resolveModelBaseDir } from './model.js';
 
 const DEFAULT_DIMENSIONS = 384;
 const providers = new Map();
@@ -36,7 +36,9 @@ function hashEmbedding(text, dimensions) {
 
 async function createLocalPipeline({ model, dtype = DEFAULT_DTYPE }) {
   const { env, pipeline } = await import('@huggingface/transformers');
-  env.localModelPath = getModelBaseDir();
+  // Points at the packaged model when nothing is installed locally, so the
+  // model is read straight out of the package instead of being copied first.
+  env.localModelPath = resolveModelBaseDir({ model }) ?? getModelBaseDir();
   env.allowLocalModels = true;
   env.allowRemoteModels = false;
   return pipeline('feature-extraction', model, { dtype });
