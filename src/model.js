@@ -31,16 +31,12 @@ const REMOTE_SOURCES = [
   { source: 'huggingface', base: HF_BASE },
 ];
 
-// The npm package ships the q4 model under <package root>/model (see the
-// "files" field in package.json), so a global install already has everything
-// needed to run `--semantic` offline.
-export function getBundledModelDir() {
+// The npm package ships the q4 model under <package root>/model, laid out as
+// <base>/<org>/<name>/ so transformers.js can load it straight out of the
+// package. A global install is therefore ready for `--semantic` with no
+// install step, no download, and no second copy on disk.
+export function getBundledModelBaseDir() {
   return path.resolve(fileURLToPath(new URL('../model', import.meta.url)));
-}
-
-export function isBundledModelAvailable(bundledDir = getBundledModelDir()) {
-  if (!bundledDir) return false;
-  return MODEL_FILES.every(file => fs.existsSync(path.join(bundledDir, file)));
 }
 
 export function getModelBaseDir() {
@@ -58,22 +54,42 @@ export function getModelFiles() {
   return [...MODEL_FILES];
 }
 
-export function isModelInstalled(options = {}) {
+export function isModelAvailable(options = {}) {
+  if (!options.baseDir) return false;
   const dir = getModelDir(options);
   return MODEL_FILES.every(file => fs.existsSync(path.join(dir, file)));
 }
 
+// The user data directory wins so that `model install --source` and
+// LCS_MODEL_DIR stay effective overrides; the packaged copy is the fallback.
+export function resolveModelBaseDir({
+  baseDir = getModelBaseDir(),
+  bundledBaseDir = getBundledModelBaseDir(),
+  model = DEFAULT_MODEL,
+} = {}) {
+  if (isModelAvailable({ baseDir, model })) return baseDir;
+  if (isModelAvailable({ baseDir: bundledBaseDir, model })) return bundledBaseDir;
+  return null;
+}
+
 export function modelStatus(options = {}) {
-  const dir = getModelDir(options);
-  const files = MODEL_FILES.map(file => ({ file, exists: fs.existsSync(path.join(dir, file)) }));
-  const bundledDir = options.bundledDir === undefined ? getBundledModelDir() : options.bundledDir;
+  const model = options.model ?? DEFAULT_MODEL;
+  const baseDir = options.baseDir ?? getModelBaseDir();
+  const bundledBaseDir = options.bundledBaseDir === undefined ? getBundledModelBaseDir() : options.bundledBaseDir;
+  const resolved = resolveModelBaseDir({ baseDir, bundledBaseDir, model });
+  const resolvedFrom = resolved === null ? null : (resolved === baseDir ? 'user' : 'packaged');
+  // Report the files of whichever copy will actually be loaded; with none
+  // available, report the user data directory so the paths stay actionable.
+  const dir = getModelDir({ baseDir: resolved ?? baseDir, model });
   return {
-    model: options.model ?? DEFAULT_MODEL,
+    model,
     dtype: DEFAULT_DTYPE,
     dir,
-    installed: files.every(file => file.exists),
-    files,
-    bundled: { dir: bundledDir, available: isBundledModelAvailable(bundledDir) },
+    baseDir,
+    bundledBaseDir,
+    available: resolved !== null,
+    resolvedFrom,
+    files: MODEL_FILES.map(file => ({ file, exists: fs.existsSync(path.join(dir, file)) })),
   };
 }
 
@@ -110,53 +126,47 @@ async function downloadModelDirectory(destinationDir, fetchImpl) {
   throw new Error(`model download failed from every source\n  ${failures.join('\n  ')}`);
 }
 
+// Only needed when the packaged model is absent — a git checkout without the
+// model/ directory, or a deliberate override of the packaged copy.
 export async function installModel({
   baseDir = getModelBaseDir(),
   model = DEFAULT_MODEL,
   sourceDir,
-  bundledDir,
   fetchImpl = globalThis.fetch,
 } = {}) {
   if (model !== DEFAULT_MODEL) throw new Error(`unsupported model: ${model}`);
   const destinationDir = getModelDir({ baseDir, model });
-  const bundled = bundledDir === undefined ? getBundledModelDir() : bundledDir;
   await fsp.mkdir(destinationDir, { recursive: true });
 
-  // Explicit --source wins, then the copy shipped in the package, then remote.
-  let source;
-  if (sourceDir) {
-    await copyModelDirectory(path.resolve(sourceDir), destinationDir);
-    source = 'source';
-  } else if (isBundledModelAvailable(bundled)) {
-    await copyModelDirectory(bundled, destinationDir);
-    source = 'bundled';
-  } else {
-    source = await downloadModelDirectory(destinationDir, fetchImpl);
-  }
+  const source = sourceDir
+    ? (await copyModelDirectory(path.resolve(sourceDir), destinationDir), 'source')
+    : await downloadModelDirectory(destinationDir, fetchImpl);
 
-  return { ...modelStatus({ baseDir, model, bundledDir: bundled }), source };
+  return { ...modelStatus({ baseDir, model }), source, baseDir };
 }
 
-// Called before any semantic query: make the model usable, preferring the copy
-// that ships with the package so the first `--semantic` run works offline.
+// Called before any semantic query. Resolving is normally enough: the packaged
+// model is loaded where it lies, so nothing is copied and nothing is fetched.
 export async function ensureModelReady({
   baseDir = getModelBaseDir(),
   model = DEFAULT_MODEL,
-  bundledDir,
+  bundledBaseDir,
   allowDownload = true,
   fetchImpl = globalThis.fetch,
 } = {}) {
-  const bundled = bundledDir === undefined ? getBundledModelDir() : bundledDir;
-  if (isModelInstalled({ baseDir, model })) {
-    return { ...modelStatus({ baseDir, model, bundledDir: bundled }), source: 'installed' };
-  }
-  if (isBundledModelAvailable(bundled)) {
-    return installModel({ baseDir, model, bundledDir: bundled, fetchImpl });
+  const bundled = bundledBaseDir === undefined ? getBundledModelBaseDir() : bundledBaseDir;
+  const resolved = resolveModelBaseDir({ baseDir, bundledBaseDir: bundled, model });
+  if (resolved !== null) {
+    return {
+      ...modelStatus({ baseDir, model, bundledBaseDir: bundled }),
+      source: resolved === baseDir ? 'user' : 'packaged',
+      baseDir: resolved,
+    };
   }
   if (!allowDownload) {
-    throw new Error(`the local ${DEFAULT_DTYPE} embedding model is not available; run \`lcs model install\` to fetch it`);
+    throw new Error(`the ${DEFAULT_DTYPE} embedding model is not available; run \`lcs model install\` to fetch it`);
   }
-  return installModel({ baseDir, model, bundledDir: null, fetchImpl });
+  return installModel({ baseDir, model, fetchImpl });
 }
 
 export async function removeModel(options = {}) {

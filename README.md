@@ -91,21 +91,21 @@ For lexical + semantic hybrid retrieval:
 lcs context "fix authentication refresh race" --semantic
 ```
 
-The q4 embedding model ships inside the npm package, so the first `--semantic`
-query installs it from that bundled copy and works offline — no separate
-`lcs model install` step and no download. Run `lcs model status` to see both the
-installed path and whether the packaged copy is present.
+That is the whole setup. The q4 embedding model ships inside the npm package and
+is read directly from there, so `--semantic` works offline on a fresh install
+with nothing to install, nothing to download, and no second copy on disk.
+`lcs model status` reports `available (shipped with the package)`.
 
-`lcs model install` resolves its source in this order:
+The model directory is resolved in this order:
 
-1. `--source <directory>` — a model directory you downloaded yourself, never uses the network
-2. the copy bundled in the installed package
-3. `raw.githubusercontent.com/haomiao33/local-context-store`
-4. `huggingface.co/onnx-community/all-MiniLM-L6-v2-ONNX`
+1. the user data directory — only populated by `lcs model install`, so an explicit install always wins
+2. the copy shipped in the package
 
-Only a source-only checkout that skipped `model/` reaches steps 3 and 4. If every
-source fails, the error lists each attempt so you can pick one and pass it via
-`--source`.
+`LCS_MODEL_DIR` overrides the user data directory. `lcs model install` is needed
+only for a source checkout without `model/`; it downloads from
+`raw.githubusercontent.com/haomiao33/local-context-store`, then
+`huggingface.co/onnx-community/all-MiniLM-L6-v2-ONNX`, and if every source fails
+the error lists each attempt so you can pick one and pass it via `--source`.
 
 The first semantic query can be slower because missing embeddings are generated and persisted. Repeated queries reuse persisted embeddings.
 
@@ -270,11 +270,14 @@ lcs context "refactor payment service" --budget 4000
 lcs model status
 ```
 
-Shows the model directory, dtype, installation status, and required files.
+Shows which copy of the model will be loaded, its dtype, path, and required
+files. On an npm install this reports `available (shipped with the package)`
+without any setup step.
 
 ### `lcs model install`
 
-Install the default q4 model:
+Not needed for normal use — the packaged model is read in place. Use it for a
+source checkout without `model/`, or to override the packaged copy:
 
 ```bash
 lcs model install
@@ -287,12 +290,17 @@ lcs model install --source C:\models\all-MiniLM-L6-v2-ONNX
 ```
 
 `--source` copies an already-downloaded model and does not use the network.
+Either way the model lands in the user data directory, which takes precedence
+over the packaged copy.
 
 ### `lcs model remove`
 
 ```bash
 lcs model remove
 ```
+
+Removes only the user data directory copy. The model shipped with the package is
+untouched and stays available, so `--semantic` keeps working.
 
 Removes the shared local embedding model.
 
@@ -460,7 +468,7 @@ The core store is local:
 - no hosted vector database is required
 - no embedding API key is required
 
-For a fully offline setup, install the model from a local directory with `lcs model install --source ...` and use `HF_HUB_OFFLINE=1`.
+An npm install is already fully offline: the model ships with the package and is never fetched. For a source checkout, install the model from a local directory with `lcs model install --source ...`.
 
 ---
 
