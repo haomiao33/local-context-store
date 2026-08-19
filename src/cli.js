@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from 'node:fs';
 import path from 'node:path';
 import { Command } from 'commander';
 import { createStore, projectDatabase, ITEM_TYPES } from './store.js';
@@ -7,12 +8,18 @@ import { getModelBaseDir, modelStatus, installModel, removeModel } from './model
 
 const cwd = process.cwd();
 const projectId = path.resolve(cwd);
+
+// Single source of truth for the version: the published package manifest.
+// npm always ships package.json, so this resolves for both `npm link` and
+// global installs.
+const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+
 const program = new Command();
 
 program
   .name('lcs')
   .description('Local Context Store for coding agents')
-  .version('0.2.0-alpha.2')
+  .version(pkg.version)
   .showHelpAfterError();
 
 program.command('init').description('Initialize a project-local context database at .context/context.db').action(() => {

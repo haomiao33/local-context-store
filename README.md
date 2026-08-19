@@ -38,6 +38,18 @@ lcs --help
 lcs init
 ```
 
+If your shell reports `lcs: command not found`, npm's global bin directory is not
+on your `PATH`. Check where npm puts it and add it:
+
+```bash
+npm config get prefix          # e.g. /opt/node or ~/.nvm/versions/node/v22.14.0
+export PATH="$(npm config get prefix)/bin:$PATH"
+```
+
+Add that `export` line to your shell profile to make it permanent. Note that on
+Debian/Ubuntu `~/.bashrc` returns early for non-interactive shells, so put it in
+`~/.profile` as well if scripts need to find `lcs`.
+
 The project database is created at:
 
 ```text

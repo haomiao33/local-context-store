@@ -62,3 +62,10 @@ test('cli model help documents install, status, and remove', () => {
   const result = run(tempProject(), ['model', '--help']); assert.equal(result.status, 0);
   assert.match(result.stdout, /install/); assert.match(result.stdout, /status/); assert.match(result.stdout, /remove/);
 });
+
+test('cli --version matches the package version', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf8'));
+  const result = run(tempProject(), ['--version']);
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout.trim(), pkg.version);
+});
