@@ -2,6 +2,14 @@
   "name": "local-context-store",
   "version": "0.5.0",
   "description": "A local-first context store for coding agents such as Claude Code and Codex.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/haomiao33/local-context-store.git"
+  },
+  "homepage": "https://github.com/haomiao33/local-context-store#readme",
+  "bugs": {
+    "url": "https://github.com/haomiao33/local-context-store/issues"
+  },
   "type": "module",
   "bin": {
     "lcs": "./src/cli.js"
