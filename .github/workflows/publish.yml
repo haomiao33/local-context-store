@@ -1,0 +1,49 @@
+name: Publish
+
+# Publishes to npm through trusted publishing (OIDC). The npm package is
+# configured to trust this repository and this workflow filename, so no
+# NPM_TOKEN secret exists or is needed, and provenance is attached
+# automatically.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+
+      # Trusted publishing needs npm 11.5.1 or newer; Node 22 ships an older one.
+      - name: Use an npm that supports trusted publishing
+        run: npm install -g npm@latest
+
+      # A hardcoded version has drifted from the manifest twice in this repo.
+      # Refuse to publish a tag that disagrees with package.json.
+      - name: Verify the tag matches the package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match package.json version ${version}" >&2
+            exit 1
+          fi
+          echo "publishing ${version}"
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npm publish

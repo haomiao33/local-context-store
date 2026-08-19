@@ -278,6 +278,32 @@ lcs remember "Auth uses Zustand" --type decision --importance 0.9
 | `-t, --type <type>` | `note` | `fact`, `decision`, `task`, `constraint`, `observation`, `note` |
 | `-i, --importance <number>` | `0.5` | `0` to `1`; higher values rank more strongly |
 
+Remembering is idempotent: storing content that already exists in the project
+updates that entry — refreshing its type, importance, and `updated_at` — instead
+of adding a duplicate. Agents restate the same fact across sessions, and
+duplicates would compete for the same Context Pack budget.
+
+### `lcs forget <id>`
+
+Remove an entry that is wrong or no longer true. Ids are shown by `lcs search`:
+
+```bash
+lcs forget 11afcbf5-0ffc-4886-80ee-41669a37e80a
+```
+
+This clears the entry, its search index row, and its embedding together.
+
+### `lcs reindex`
+
+Rebuild the full-text search index from the stored items:
+
+```bash
+lcs reindex
+```
+
+Run this when `lcs status` reports FTS index drift. Until then, `search` and
+`context` silently miss the items that are not indexed.
+
 ### `lcs search <query>`
 
 Direct SQLite FTS5 search:
@@ -410,8 +436,10 @@ claude
 The MCP server exposes:
 
 - `context_get` — retrieve durable context for a task.
+- `context_search` — find stored context by exact keyword, for symbols, API names, and error codes.
 - `context_remember` — save durable project context.
 - `context_snapshot` — create a resume/handoff checkpoint.
+- `context_status` — report what the project remembers and whether retrieval is healthy.
 
 Typical workflow:
 

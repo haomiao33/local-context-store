@@ -86,6 +86,27 @@ program.command('search <query>')
     for (const r of rows) console.log(`${r.id}  [${r.type}] ${r.content}`);
   });
 
+program.command('forget <id>')
+  .description('Remove a stored entry that is wrong or no longer true')
+  .addHelpText('after', '\nExamples:\n  $ lcs forget 11afcbf5-0ffc-4886-80ee-41669a37e80a\n\nIds are shown by `lcs search`. Removing an entry also clears its search index\nrow and its embedding.\n')
+  .action(id => {
+    const store = createStore(cwd);
+    let forgotten;
+    try { forgotten = store.forget(id); } finally { store.close(); }
+    if (!forgotten) throw new Error(`no item with id ${id}`);
+    console.log(`Forgot ${id}`);
+  });
+
+program.command('reindex')
+  .description('Rebuild the full-text search index from the stored items')
+  .addHelpText('after', '\nExamples:\n  $ lcs reindex\n\nRun this when `lcs status` reports FTS index drift; until then search silently\nmisses the items that are not indexed.\n')
+  .action(() => {
+    const store = createStore(cwd);
+    let result;
+    try { result = store.reindex(); } finally { store.close(); }
+    console.log(`Reindexed ${result.indexed} item${result.indexed === 1 ? '' : 's'}`);
+  });
+
 program.command('context <task>')
   .description('Build a relevant, token-budgeted context pack for a coding task')
   .addHelpText('after', '\nExamples:\n  $ lcs context "fix authentication refresh race"\n  $ lcs context "fix authentication refresh race" --semantic\n  $ lcs context "refactor payment service" --budget 4000\n\nThe budget is an approximate token limit for the returned context pack.\n--semantic enables local embedding + FTS5 hybrid retrieval.\nThe q4 model ships with the package and is used directly; there is nothing to install.\n')

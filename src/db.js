@@ -74,7 +74,9 @@ export function openDatabase(filename) {
 
 export function rebuildFts(db) {
   withSqliteRetry(() => {
-    db.exec("INSERT INTO items_fts(items_fts) VALUES('delete-all');");
+    // items_fts owns its content, so the 'delete-all' command is rejected;
+    // a plain DELETE is the supported way to empty such a table.
+    db.exec('DELETE FROM items_fts;');
     const rows = db.prepare('SELECT id, project_id, content, type FROM items').all();
     const insert = db.prepare('INSERT INTO items_fts(id, project_id, content, type) VALUES (?, ?, ?, ?)');
     const tx = db.transaction(() => rows.forEach(r => insert.run(r.id, r.project_id, r.content, r.type)));
